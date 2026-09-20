@@ -81,6 +81,18 @@ def test_missing_database_is_operational_and_never_created(tmp_path: Path) -> No
     assert not missing.exists()
 
 
+def test_invalid_sqlite_is_rejected_before_model_call(tmp_path: Path) -> None:
+    invalid = tmp_path / "invalid.db"
+    invalid.write_text("isto não é sqlite", encoding="utf-8")
+    model = StubLLM()
+
+    answer = DataAssistant(invalid, llm=model).ask("Quantos registros?")
+
+    assert answer.status == "error"
+    assert "schema" in answer.response or "SQLite" in answer.response
+    assert model.texts == ["SELECT COUNT(*) AS total FROM records"]
+
+
 def test_empty_question_returns_contract_without_model_call(assistant_db: Path) -> None:
     answer = DataAssistant(assistant_db, llm=StubLLM()).ask("   ")
     assert answer.status == "error"

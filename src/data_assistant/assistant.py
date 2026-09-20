@@ -88,6 +88,8 @@ class DataAssistant:
             )
 
         try:
+            # Validate and cache the source before spending a model call.
+            discover_schema(self.database_path, self.schema_cache)
             dependencies = GraphDependencies(
                 llm=self._model(),
                 executor=SQLiteExecutor(self.database_path),
@@ -109,7 +111,10 @@ class DataAssistant:
         except MissingAPIKeyError as exc:
             return _error_answer(str(exc))
         except SchemaDiscoveryError as exc:
-            return _error_answer(str(exc))
+            return _error_answer(
+                str(exc),
+                warning="Confirme se DB aponta para um arquivo SQLite legível.",
+            )
         except Exception as exc:
             logger.error("Falha operacional no grafo: %s", type(exc).__name__)
             return _error_answer(

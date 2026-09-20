@@ -138,6 +138,13 @@ def _initialize_session(database_path: Path) -> None:
         st.session_state.assistant_database_path = str(database_path)
 
 
+def _query_database_path() -> Path:
+    runtime_db = st.query_params.get("DB")
+    if isinstance(runtime_db, list):
+        runtime_db = runtime_db[-1] if runtime_db else None
+    return resolve_database_path(runtime_db)
+
+
 @st.cache_data(show_spinner=False)
 def _cached_png(
     data_json: str,
@@ -315,7 +322,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     st.markdown(MATERIAL_STYLES, unsafe_allow_html=True)
-    database_path = resolve_database_path()
+    database_path = _query_database_path()
     _initialize_session(database_path)
     selected_question, theme_mode = _sidebar(database_path)
     override = _theme_override(theme_mode)
