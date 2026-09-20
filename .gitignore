@@ -47,3 +47,12 @@ codex-security-results/
 .DS_Store
 Thumbs.db
 *.ipynb_checkpoints/
+
+# Material de planejamento e desenvolvimento — não faz parte do repositório oficial
+/openspec/
+/docs/
+/HANDOFF.md
+/PROMPT_IMPLEMENTADOR.md
+/.agents/
+/.codex/
+.streamlit/secrets.toml

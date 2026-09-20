@@ -8,9 +8,8 @@ no Streamlit.
 ## Estado do projeto
 
 Este commit contém o bootstrap seguro e o plano de implementação. O código de produto
-será desenvolvido seguindo `openspec/changes/implement-data-assistant/tasks.md`.
-Consulte [`PROMPT_IMPLEMENTADOR.md`](PROMPT_IMPLEMENTADOR.md) para a instrução
-autocontida do modelo executor e [`HANDOFF.md`](HANDOFF.md) para o contrato de entrega.
+será desenvolvido a partir do desafio e seus critérios de aceite. O material interno de
+planejamento e execução é mantido fora do repositório oficial.
 
 ## Regras de desenvolvimento
 
@@ -23,12 +22,6 @@ autocontida do modelo executor e [`HANDOFF.md`](HANDOFF.md) para o contrato de e
   acima deste diretório, em `../anexo_desafio_1.db`.
 - O Desafio 2 é apenas material de referência em `docs/desafio-2-pipeline/` e não será
   implementado neste repositório.
-
-## Documentação de planejamento
-
-- `openspec/`: proposta, especificação, design e tasks.
-- `docs/adr/`: decisões arquiteturais aceitas, incluindo frontend, temas e exportação.
-- `HANDOFF.md`: critérios de aceite e regras operacionais.
 
 ## Próximo passo
 
