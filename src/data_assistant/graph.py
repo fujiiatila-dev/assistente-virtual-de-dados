@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from data_assistant.contract import AssistantAnswer
 from data_assistant.prompts import (
@@ -295,10 +298,10 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
     exhausted_with_error = bool(state["last_error"])
     if exhausted_with_error:
         status = "partial" if result else "error"
-    elif not result:
-        status = "empty"
     elif not state["sufficient"] and state["query_budget"] <= 0:
         status = "partial"
+    elif not result:
+        status = "empty"
     else:
         status = "success"
 
@@ -340,3 +343,79 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
         warnings=updated["warnings"],
     )
     return updated
+
+
+ValidationRoute = Literal["executar_sql", "corrigir_sql", "formatar_resposta"]
+ExecutionRoute = Literal["corrigir_sql", "avaliar_suficiencia", "formatar_resposta"]
+SufficiencyRoute = Literal["refinar_consulta", "formatar_resposta"]
+
+
+def route_after_validation(state: AgentState, *, max_fix_attempts: int = 3) -> ValidationRoute:
+    """Route safe SQL to execution and rejected SQL through the bounded correction loop."""
+    if state["query_budget"] <= 0:
+        return "formatar_resposta"
+    if state["last_error"]:
+        if state["sql_fix_attempts"] < max_fix_attempts:
+            return "corrigir_sql"
+        return "formatar_resposta"
+    return "executar_sql"
+
+
+def route_after_execution(state: AgentState, *, max_fix_attempts: int = 3) -> ExecutionRoute:
+    """Separate execution failures from successful results."""
+    if state["last_error"]:
+        if state["sql_fix_attempts"] < max_fix_attempts and state["query_budget"] > 0:
+            return "corrigir_sql"
+        return "formatar_resposta"
+    return "avaliar_suficiencia"
+
+
+def route_after_sufficiency(state: AgentState) -> SufficiencyRoute:
+    """Refine successful but insufficient results while budget remains."""
+    if state["sufficient"] or state["query_budget"] <= 0:
+        return "formatar_resposta"
+    return "refinar_consulta"
+
+
+def build_graph(
+    dependencies: GraphDependencies,
+) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
+    """Compile the complete correction/refinement workflow."""
+    workflow = StateGraph(AgentState)
+    workflow.add_node("interpretar", lambda state: interpret_node(state, dependencies))
+    workflow.add_node(
+        "descobrir_schema", lambda state: discover_schema_node(state, dependencies)
+    )
+    workflow.add_node("gerar_sql", lambda state: generate_sql_node(state, dependencies))
+    workflow.add_node("validar_sql", lambda state: validate_sql_node(state, dependencies))
+    workflow.add_node("executar_sql", lambda state: execute_sql_node(state, dependencies))
+    workflow.add_node("corrigir_sql", lambda state: correct_sql_node(state, dependencies))
+    workflow.add_node(
+        "avaliar_suficiencia", lambda state: evaluate_sufficiency_node(state, dependencies)
+    )
+    workflow.add_node("refinar_consulta", lambda state: refine_sql_node(state, dependencies))
+    workflow.add_node(
+        "formatar_resposta", lambda state: format_response_node(state, dependencies)
+    )
+
+    workflow.add_edge(START, "interpretar")
+    workflow.add_edge("interpretar", "descobrir_schema")
+    workflow.add_edge("descobrir_schema", "gerar_sql")
+    workflow.add_edge("gerar_sql", "validar_sql")
+    workflow.add_conditional_edges(
+        "validar_sql",
+        lambda state: route_after_validation(
+            state, max_fix_attempts=dependencies.max_sql_fix_attempts
+        ),
+    )
+    workflow.add_conditional_edges(
+        "executar_sql",
+        lambda state: route_after_execution(
+            state, max_fix_attempts=dependencies.max_sql_fix_attempts
+        ),
+    )
+    workflow.add_edge("corrigir_sql", "validar_sql")
+    workflow.add_conditional_edges("avaliar_suficiencia", route_after_sufficiency)
+    workflow.add_edge("refinar_consulta", "validar_sql")
+    workflow.add_edge("formatar_resposta", END)
+    return workflow.compile(name="data-assistant")

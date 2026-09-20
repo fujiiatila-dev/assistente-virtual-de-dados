@@ -8,6 +8,7 @@ from typing import Any
 from data_assistant.executor import SQLiteExecutor
 from data_assistant.graph import (
     GraphDependencies,
+    build_graph,
     correct_sql_node,
     discover_schema_node,
     evaluate_sufficiency_node,
@@ -17,6 +18,9 @@ from data_assistant.graph import (
     initial_state,
     interpret_node,
     refine_sql_node,
+    route_after_execution,
+    route_after_sufficiency,
+    route_after_validation,
     validate_sql_node,
 )
 from data_assistant.schema import discover_schema
@@ -163,3 +167,97 @@ def test_nodes_empty_quantitative_result_is_insufficient_without_llm(tmp_path: P
     evaluated = evaluate_sufficiency_node(state, dependencies)
     assert evaluated["sufficient"] is False
     assert evaluated["steps"][-1]["node"] == "avaliar_suficiencia"
+
+
+def test_conditional_edges_cover_correction_sufficiency_and_budget() -> None:
+    state = initial_state("Pergunta")
+    state["last_error"] = "erro"
+    assert route_after_validation(state) == "corrigir_sql"
+    assert route_after_execution(state) == "corrigir_sql"
+
+    state["sql_fix_attempts"] = 3
+    assert route_after_validation(state) == "formatar_resposta"
+    assert route_after_execution(state) == "formatar_resposta"
+
+    state["last_error"] = None
+    state["sufficient"] = False
+    assert route_after_validation(state) == "executar_sql"
+    assert route_after_execution(state) == "avaliar_suficiencia"
+    assert route_after_sufficiency(state) == "refinar_consulta"
+
+    state["query_budget"] = 0
+    assert route_after_validation(state) == "formatar_resposta"
+    assert route_after_sufficiency(state) == "formatar_resposta"
+
+
+def test_compiled_graph_runs_success_path(tmp_path: Path) -> None:
+    path = _database(tmp_path)
+    llm = FakeLLM(
+        texts=["SELECT COUNT(*) AS total FROM sales"],
+        payloads=[
+            {"intent": "count"},
+            {"sufficient": True, "reason": "Contagem obtida."},
+            {
+                "response": "Há 2 vendas.",
+                "visualization": {
+                    "type": "metric",
+                    "title": "Total de vendas",
+                    "y": ["total"],
+                },
+            },
+        ],
+    )
+    dependencies = _dependencies(path, llm)
+
+    result = build_graph(dependencies).invoke(initial_state("Quantas vendas existem?"))
+
+    assert result["response"] is not None
+    assert result["response"].status == "success"
+    assert result["response"].data == [{"total": 2}]
+    assert result["queries"] == ["SELECT COUNT(*) AS total FROM sales"]
+
+
+def test_compiled_graph_corrects_sql_at_most_three_times(tmp_path: Path) -> None:
+    path = _database(tmp_path)
+    llm = FakeLLM(
+        texts=["SELECT absent FROM sales"] * 4,
+        payloads=[{"intent": "list"}],
+    )
+    dependencies = _dependencies(path, llm)
+
+    result = build_graph(dependencies).invoke(initial_state("Liste vendas"))
+
+    assert result["sql_fix_attempts"] == 3
+    assert len(result["queries"]) == 4
+    assert result["response"] is not None
+    assert result["response"].status == "error"
+    assert "Traceback" not in result["response"].response
+
+
+def test_compiled_graph_refines_empty_result_until_query_budget(tmp_path: Path) -> None:
+    path = _database(tmp_path)
+    llm = FakeLLM(
+        texts=["SELECT * FROM sales WHERE 0", "SELECT * FROM sales WHERE amount < 0"],
+        payloads=[
+            {"intent": "count"},
+            {
+                "response": "Não há registros para responder.",
+                "visualization": {"type": "table", "title": "Sem registros"},
+            },
+        ],
+    )
+    dependencies = GraphDependencies(
+        llm=llm,
+        executor=SQLiteExecutor(path),
+        schema_provider=lambda: discover_schema(path),
+        max_query_budget=2,
+    )
+    state = initial_state("Quantas vendas negativas existem?", query_budget=2)
+
+    result = build_graph(dependencies).invoke(state)
+
+    assert result["query_budget"] == 0
+    assert len(result["queries"]) == 2
+    assert result["sql_fix_attempts"] == 0
+    assert result["response"] is not None
+    assert result["response"].status == "partial"
