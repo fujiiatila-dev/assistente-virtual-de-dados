@@ -27,3 +27,11 @@ planejamento e execução é mantido fora do repositório oficial.
 
 Executar T0a e T0b, validar o dataset oficial em modo somente leitura e só então
 começar o scaffolding de T1.
+
+## Validar o anexo local
+
+O banco oficial permanece fora do repositório. Valide sua cópia sem alterá-la:
+
+```powershell
+python scripts/validate_dataset.py --db ..\anexo_desafio_1.db
+```
