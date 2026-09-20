@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, cast
@@ -171,6 +173,10 @@ class VisualizationRenderError(ValueError):
     """Raised when valid contract data still cannot be rendered."""
 
 
+class ImageExportError(RuntimeError):
+    """Raised when Kaleido cannot render a figure without hiding the answer."""
+
+
 def visualization_for_type(
     data: Sequence[Mapping[str, Any]],
     selected_type: VisualizationType,
@@ -261,3 +267,28 @@ def build_plotly_figure(
         hovermode="x unified" if visualization.type == "line" else "closest",
     )
     return figure
+
+
+def result_to_csv(data: Sequence[Mapping[str, Any]]) -> bytes:
+    """Serialize result rows as UTF-8 CSV with stable column order."""
+    rows = [dict(row) for row in data]
+    columns = _columns(rows)
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def figure_to_png(figure: go.Figure) -> bytes:
+    """Render a high-density PNG or return one operational export error."""
+    try:
+        payload = figure.to_image(format="png", scale=2)
+    except Exception as exc:
+        raise ImageExportError(
+            "O renderer de PNG está indisponível. Instale os requisitos do Kaleido "
+            "e tente novamente."
+        ) from exc
+    if not isinstance(payload, bytes):
+        raise ImageExportError("O renderer de PNG retornou um arquivo inválido.")
+    return payload
