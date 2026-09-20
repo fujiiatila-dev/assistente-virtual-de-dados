@@ -85,7 +85,8 @@ def validate_dataset(path: Path) -> tuple[list[str], list[str]]:
 
         foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
         if foreign_key_issues:
-            errors.append(f"Chaves estrangeiras com órfãos: {len(foreign_key_issues)} ocorrência(s)")
+            issue_count = len(foreign_key_issues)
+            errors.append(f"Chaves estrangeiras com órfãos: {issue_count} ocorrência(s)")
 
         for table in sorted(REQUIRED_SCHEMA):
             if table in tables:
@@ -118,7 +119,9 @@ def validate_dataset(path: Path) -> tuple[list[str], list[str]]:
                     GROUP BY cliente_id
                 )
                 SELECT
-                    SUM(CASE WHEN ABS(COALESCE(c.valor_total_gasto, 0) - COALESCE(f.total, 0)) > 0.01
+                    SUM(CASE WHEN ABS(
+                        COALESCE(c.valor_total_gasto, 0) - COALESCE(f.total, 0)
+                    ) > 0.01
                         THEN 1 ELSE 0 END),
                     SUM(CASE WHEN COALESCE(c.data_ultima_compra, '') <> COALESCE(f.ultima, '')
                         THEN 1 ELSE 0 END)
