@@ -1,0 +1,49 @@
+# Configuração e segredos locais
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+
+# Bancos SQLite e arquivos auxiliares
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Python e ferramentas
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Artefatos gerados pela aplicação e pelos testes
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.log
+dist/
+build/
+reports/
+codex-security-results/
+
+# IDE, sistema e notebooks locais
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.ipynb_checkpoints/

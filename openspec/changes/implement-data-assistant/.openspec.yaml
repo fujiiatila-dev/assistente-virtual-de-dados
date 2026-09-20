@@ -1,0 +1,9 @@
+change: implement-data-assistant
+title: Assistente Virtual de Dados (Desafio Técnico 1)
+status: proposed
+created: 2026-09-20
+artifacts:
+  - proposal.md
+  - specs/spec.md
+  - design.md
+  - tasks.md
