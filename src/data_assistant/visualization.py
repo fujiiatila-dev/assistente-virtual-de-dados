@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Any, cast
 
+import plotly.graph_objects as go
+
 from data_assistant.contract import Visualization, VisualizationType
 
 TYPE_ORDER: tuple[VisualizationType, ...] = ("table", "bar", "line", "metric")
@@ -163,3 +165,99 @@ def normalize_visualization(
         group=group if isinstance(group, str) else None,
         available_types=available,
     )
+
+
+class VisualizationRenderError(ValueError):
+    """Raised when valid contract data still cannot be rendered."""
+
+
+def visualization_for_type(
+    data: Sequence[Mapping[str, Any]],
+    selected_type: VisualizationType,
+    *,
+    title: str,
+) -> Visualization:
+    """Recompute axes locally when the user changes the available visual type."""
+    return normalize_visualization(
+        data,
+        None,
+        format_hint=selected_type,
+        default_title=title,
+    )
+
+
+def _series_for_group(
+    data: Sequence[Mapping[str, Any]], group: str
+) -> dict[str, list[Mapping[str, Any]]]:
+    series: dict[str, list[Mapping[str, Any]]] = {}
+    for row in data:
+        series.setdefault(str(row.get(group, "Sem grupo")), []).append(row)
+    return series
+
+
+def build_plotly_figure(
+    data: Sequence[Mapping[str, Any]],
+    visualization: Visualization,
+    *,
+    dark: bool = False,
+) -> go.Figure:
+    """Build the single Plotly representation used on screen and for PNG export."""
+    rows = [dict(row) for row in data]
+    template = "plotly_dark" if dark else "plotly_white"
+    figure = go.Figure()
+
+    if visualization.type == "table":
+        columns = _columns(rows)
+        figure.add_trace(
+            go.Table(
+                header={"values": columns, "align": "left"},
+                cells={
+                    "values": [[row.get(column) for row in rows] for column in columns],
+                    "align": "left",
+                },
+            )
+        )
+    elif visualization.type == "metric":
+        metric_column = visualization.y[0] if visualization.y else None
+        value = rows[0].get(metric_column) if rows and metric_column else None
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise VisualizationRenderError("A métrica não possui um valor numérico compatível.")
+        figure.add_trace(
+            go.Indicator(
+                mode="number",
+                value=value,
+                title={"text": visualization.title},
+            )
+        )
+    elif visualization.type in ("bar", "line"):
+        x_column = visualization.x
+        y_columns = visualization.y or []
+        if not x_column or not y_columns:
+            raise VisualizationRenderError("A visualização requer eixos x e y.")
+        trace_type = go.Bar if visualization.type == "bar" else go.Scatter
+        trace_options = {"mode": "lines+markers"} if visualization.type == "line" else {}
+        grouped = (
+            _series_for_group(rows, visualization.group) if visualization.group else {"": rows}
+        )
+        for group_name, group_rows in grouped.items():
+            for y_column in y_columns:
+                label_parts = [part for part in (group_name, y_column) if part]
+                figure.add_trace(
+                    trace_type(
+                        x=[row.get(x_column) for row in group_rows],
+                        y=[row.get(y_column) for row in group_rows],
+                        name=" · ".join(label_parts),
+                        **trace_options,
+                    )
+                )
+    else:
+        raise VisualizationRenderError("Tipo de visualização não suportado.")
+
+    figure.update_layout(
+        template=template,
+        title=None if visualization.type == "metric" else visualization.title,
+        margin={"l": 24, "r": 24, "t": 56, "b": 32},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02},
+        hovermode="x unified" if visualization.type == "line" else "closest",
+    )
+    return figure

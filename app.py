@@ -10,6 +10,7 @@ import streamlit as st
 from data_assistant.assistant import DataAssistant, resolve_database_path
 from data_assistant.contract import AssistantAnswer
 from data_assistant.llm import DEFAULT_MODEL
+from data_assistant.visualization import VisualizationRenderError, build_plotly_figure
 
 EXAMPLE_QUESTIONS = (
     "Quais são os 5 estados com mais clientes que compraram pelo App em maio?",
@@ -96,6 +97,40 @@ def _initialize_session(database_path: Path) -> None:
         st.session_state.assistant_database_path = str(database_path)
 
 
+def _render_visualization(answer: AssistantAnswer) -> None:
+    if not answer.data:
+        return
+    try:
+        figure = build_plotly_figure(answer.data, answer.visualization)
+    except VisualizationRenderError as exc:
+        st.warning(f"Não foi possível montar o gráfico: {exc} Exibindo a tabela.")
+        st.dataframe(answer.data, use_container_width=True, hide_index=True)
+        return
+
+    if answer.visualization.type == "table":
+        st.dataframe(answer.data, use_container_width=True, hide_index=True)
+    else:
+        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+
+
+def _render_evidence(answer: AssistantAnswer) -> None:
+    with st.expander("Etapas e evidências da resposta", expanded=False):
+        if not answer.steps:
+            st.caption("Nenhuma etapa foi registrada para esta resposta.")
+            return
+        for index, step in enumerate(answer.steps, start=1):
+            node = str(step.get("node", "etapa")).replace("_", " ").title()
+            st.markdown(f"**{index}. {node}**")
+            st.caption(str(step.get("detail", "Etapa concluída.")))
+            if step.get("sql"):
+                st.code(str(step["sql"]), language="sql")
+            if step.get("error"):
+                st.warning(str(step["error"]))
+            rows = step.get("rows")
+            if isinstance(rows, list) and rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def _render_answer(answer: AssistantAnswer) -> None:
     status_renderers = {
         "error": st.error,
@@ -109,6 +144,8 @@ def _render_answer(answer: AssistantAnswer) -> None:
         st.markdown(answer.response)
     for warning in answer.warnings:
         st.warning(warning)
+    _render_visualization(answer)
+    _render_evidence(answer)
 
 
 def _render_history(messages: list[dict[str, Any]]) -> None:
