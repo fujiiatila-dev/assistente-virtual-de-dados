@@ -9,6 +9,7 @@ from typing import Any, Final
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 DEFAULT_MODEL: Final = "google/gemini-2.5-flash"
 DEFAULT_BASE_URL: Final = "https://openrouter.ai/api/v1"
@@ -89,7 +90,7 @@ class OpenRouterLLM:
         self.settings = settings or LLMSettings.from_environment()
         self.settings.require_api_key()
         self._client = ChatOpenAI(
-            api_key=self.settings.api_key,
+            api_key=SecretStr(self.settings.api_key),
             base_url=self.settings.base_url,
             model=self.settings.model,
             temperature=0,

@@ -1,5 +1,7 @@
 """Virtual data assistant package."""
 
-__all__ = ["__version__"]
+from data_assistant.assistant import DataAssistant, ask
+
+__all__ = ["DataAssistant", "__version__", "ask"]
 
 __version__ = "0.1.0"
