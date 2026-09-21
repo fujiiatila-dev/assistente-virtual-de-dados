@@ -2,7 +2,7 @@
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![uv](https://img.shields.io/badge/deps-uv-5C4EE5)
-![testes](https://img.shields.io/badge/testes-71%20casos-16803A)
+![testes](https://img.shields.io/badge/testes-62%20casos-16803A)
 
 Assistente em linguagem natural para perguntas de negócio sobre um SQLite. O produto
 descobre o schema em runtime, gera e corrige SQL com LangGraph, executa somente leitura e
@@ -148,7 +148,7 @@ As decisões estão registradas nos ADRs 001–008 do material de arquitetura do
 
 ## Perguntas e resultados do anexo
 
-| Pergunta | Resultado determinístico de referência | Visual |
+| Pergunta | Resultado esperado no anexo | Visual |
 |---|---|---|
 | 5 estados com mais clientes que compraram via App em maio | SP 6; MG 3; SC 3; AL 2; ES 2 | Barras |
 | Clientes associados a campanhas WhatsApp em 2024 | 33 clientes distintos; 17 interações (`interagiu=1`); 35 envios | Métrica |
@@ -168,8 +168,10 @@ uv run ruff check .
 uv run mypy src/
 ```
 
-Os testes unitários e a aceitação determinística não chamam serviços externos. Os cinco
-testes reais usam o marcador `llm` e são ignorados quando a chave não existe:
+Os testes unitários exercitam schema, guardrails, execução e renderização sem simular uma
+query gerada. As cinco perguntas de aceite passam exclusivamente pelo agente real: o SQL é
+produzido pelo OpenRouter a partir do schema descoberto em runtime. Esses testes usam o
+marcador `llm` e são ignorados quando a chave não existe:
 
 ```powershell
 uv run pytest -m llm

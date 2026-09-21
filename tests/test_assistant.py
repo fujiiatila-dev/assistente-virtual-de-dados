@@ -2,36 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from data_assistant.assistant import DataAssistant, ask, resolve_database_path
-
-
-class StubLLM:
-    def __init__(self) -> None:
-        self.texts = ["SELECT COUNT(*) AS total FROM records"]
-        self.payloads: list[dict[str, Any]] = [
-            {"intent": "count"},
-            {"sufficient": True, "reason": "Contagem disponível."},
-            {
-                "response": "Há 2 registros.",
-                "visualization": {
-                    "type": "metric",
-                    "title": "Total",
-                    "y": ["total"],
-                },
-            },
-        ]
-
-    def complete(self, system_prompt: str, user_prompt: str) -> str:
-        del system_prompt, user_prompt
-        return self.texts.pop(0)
-
-    def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        del system_prompt, user_prompt
-        return self.payloads.pop(0)
+from data_assistant.assistant import DataAssistant, resolve_database_path
 
 
 @pytest.fixture
@@ -46,16 +20,6 @@ def assistant_db(tmp_path: Path) -> Path:
     )
     connection.close()
     return path
-
-
-def test_ask_runs_graph_and_validates_contract(assistant_db: Path) -> None:
-    answer = ask("Quantos registros existem?", database_path=assistant_db, llm=StubLLM())
-
-    assert answer.status == "success"
-    assert answer.response == "Há 2 registros."
-    assert answer.data == [{"total": 2}]
-    assert answer.visualization.type == "metric"
-    assert answer.queries == ["SELECT COUNT(*) AS total FROM records"]
 
 
 def test_runtime_database_has_priority_over_environment(
@@ -73,7 +37,7 @@ def test_runtime_database_has_priority_over_environment(
 
 def test_missing_database_is_operational_and_never_created(tmp_path: Path) -> None:
     missing = tmp_path / "missing.db"
-    answer = DataAssistant(missing, llm=StubLLM()).ask("Quantos registros?")
+    answer = DataAssistant(missing).ask("Quantos registros?")
 
     assert answer.status == "error"
     assert "não encontrado" in answer.response
@@ -81,19 +45,30 @@ def test_missing_database_is_operational_and_never_created(tmp_path: Path) -> No
     assert not missing.exists()
 
 
-def test_invalid_sqlite_is_rejected_before_model_call(tmp_path: Path) -> None:
+def test_invalid_sqlite_is_rejected_before_agent_call(tmp_path: Path) -> None:
     invalid = tmp_path / "invalid.db"
     invalid.write_text("isto não é sqlite", encoding="utf-8")
-    model = StubLLM()
 
-    answer = DataAssistant(invalid, llm=model).ask("Quantos registros?")
+    answer = DataAssistant(invalid).ask("Quantos registros?")
 
     assert answer.status == "error"
     assert "schema" in answer.response or "SQLite" in answer.response
-    assert model.texts == ["SELECT COUNT(*) AS total FROM records"]
+    assert "Traceback" not in answer.response
 
 
-def test_empty_question_returns_contract_without_model_call(assistant_db: Path) -> None:
-    answer = DataAssistant(assistant_db, llm=StubLLM()).ask("   ")
+def test_empty_question_returns_contract_without_agent_call(assistant_db: Path) -> None:
+    answer = DataAssistant(assistant_db).ask("   ")
     assert answer.status == "error"
     assert "Informe uma pergunta" in answer.response
+
+
+def test_valid_question_requires_real_openrouter_configuration(
+    assistant_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+
+    answer = DataAssistant(assistant_db).ask("Quantos registros existem?")
+
+    assert answer.status == "error"
+    assert "OPENROUTER_API_KEY" in answer.response
+    assert answer.queries == []

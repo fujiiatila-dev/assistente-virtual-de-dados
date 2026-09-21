@@ -2,7 +2,7 @@
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![uv](https://img.shields.io/badge/deps-uv-5C4EE5)
-![tests](https://img.shields.io/badge/tests-71%20cases-16803A)
+![tests](https://img.shields.io/badge/tests-62%20cases-16803A)
 
 A natural-language business data assistant for SQLite. It discovers the schema at
 runtime, generates and corrects SQL with LangGraph, enforces read-only execution, and
@@ -147,7 +147,7 @@ materials.
 
 ## Attachment questions and results
 
-| Question | Deterministic reference result | View |
+| Question | Expected attachment result | View |
 |---|---|---|
 | Top five states whose customers purchased through the App in May | São Paulo 6; Minas Gerais 3; Santa Catarina 3; Alagoas 2; Espírito Santo 2 | Bar |
 | Customers associated with WhatsApp campaigns in 2024 | 33 distinct customers; 17 interactions (`interagiu=1`); 35 sends | Metric |
@@ -167,8 +167,10 @@ uv run ruff check .
 uv run mypy src/
 ```
 
-Unit tests and deterministic acceptance tests do not call external services. The five
-live tests use the `llm` marker and skip when the key is missing:
+Unit tests cover schema discovery, guardrails, execution, and rendering without simulating
+a generated query. The five acceptance questions run exclusively through the real agent:
+OpenRouter generates SQL from the runtime-discovered schema. These tests use the `llm`
+marker and skip when the key is missing:
 
 ```powershell
 uv run pytest -m llm
