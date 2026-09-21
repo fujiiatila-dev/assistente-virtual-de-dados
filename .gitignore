@@ -53,6 +53,7 @@ Thumbs.db
 /docs/
 /HANDOFF.md
 /PROMPT_IMPLEMENTADOR.md
+/AUDITORIA_V1_PENDENCIAS.md
 /.agents/
 /.codex/
 .streamlit/secrets.toml
