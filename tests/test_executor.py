@@ -36,7 +36,32 @@ def test_executes_relative_and_absolute_windows_safe_paths(
 def test_caps_an_excessive_limit(executor_db: Path) -> None:
     rows = SQLiteExecutor(executor_db, row_limit=10).execute("SELECT value FROM numbers LIMIT 999")
     assert len(rows) == 10
-    assert enforce_row_limit("SELECT value FROM numbers", 10).endswith("LIMIT 10")
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected_limit"),
+    [
+        ("SELECT value FROM numbers", 10),
+        ("SELECT value FROM numbers LIMIT 0", 0),
+        ("SELECT value FROM numbers LIMIT 5", 5),
+        ("SELECT value FROM numbers LIMIT 10", 10),
+        ("SELECT value FROM numbers LIMIT 999", 10),
+        ("SELECT value FROM numbers LIMIT -1", 10),
+        ("SELECT value FROM numbers LIMIT -20", 10),
+    ],
+)
+def test_enforces_only_non_negative_limits_within_maximum(
+    sql: str, expected_limit: int
+) -> None:
+    assert enforce_row_limit(sql, 10).endswith(f"LIMIT {expected_limit}")
+
+
+def test_negative_limit_is_capped_before_execution(executor_db: Path) -> None:
+    rows = SQLiteExecutor(executor_db, row_limit=10).execute(
+        "SELECT value FROM numbers ORDER BY value LIMIT -1"
+    )
+
+    assert rows == [{"value": value} for value in range(10)]
 
 
 def test_read_only_connection_rejects_writes(executor_db: Path) -> None:

@@ -45,7 +45,7 @@ def enforce_row_limit(sql: str, maximum_rows: int = DEFAULT_ROW_LIMIT) -> str:
     if not isinstance(expression, exp.Query):
         return sql
     existing = _literal_limit(expression)
-    if existing is not None and existing <= maximum_rows:
+    if existing is not None and 0 <= existing <= maximum_rows:
         return expression.sql(dialect="sqlite")
     return expression.limit(maximum_rows, copy=True).sql(dialect="sqlite")
 
