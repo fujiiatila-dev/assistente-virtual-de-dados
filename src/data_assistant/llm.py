@@ -23,6 +23,11 @@ class LLMResponseError(RuntimeError):
     """Raised when an LLM response cannot satisfy the requested contract."""
 
 
+def resolve_model_name() -> str:
+    """Return the effective OpenRouter model name shown and used at runtime."""
+    return os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
 @dataclass(frozen=True)
 class LLMSettings:
     """Runtime configuration for the OpenAI-compatible OpenRouter client."""
@@ -37,7 +42,7 @@ class LLMSettings:
     def from_environment(cls) -> LLMSettings:
         return cls(
             api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
-            model=os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL,
+            model=resolve_model_name(),
             base_url=os.getenv("OPENROUTER_BASE_URL", DEFAULT_BASE_URL).strip()
             or DEFAULT_BASE_URL,
             timeout_seconds=float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30")),

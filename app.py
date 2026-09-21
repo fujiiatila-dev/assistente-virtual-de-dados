@@ -10,7 +10,7 @@ import streamlit as st
 
 from data_assistant.assistant import DataAssistant, resolve_database_path
 from data_assistant.contract import AssistantAnswer, Visualization, VisualizationType
-from data_assistant.llm import DEFAULT_MODEL
+from data_assistant.llm import resolve_model_name
 from data_assistant.visualization import (
     ImageExportError,
     VisualizationRenderError,
@@ -289,7 +289,7 @@ def _sidebar(database_path: Path) -> tuple[str | None, str]:
         else:
             st.error(f"Banco ausente · {database_path.name}", icon="⚠️")
             st.caption("Configure DB_PATH no arquivo .env e reinicie a aplicação.")
-        st.caption(f"Modelo · {DEFAULT_MODEL}")
+        st.caption(f"Modelo · {resolve_model_name()}")
         theme_mode = st.selectbox(
             "Tema",
             options=("System", "Light", "Dark"),

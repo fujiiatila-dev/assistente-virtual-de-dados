@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 from data_assistant.assistant import DataAssistant
@@ -38,6 +39,22 @@ def test_query_parameter_selects_runtime_database_in_streamlit(tmp_path: Path) -
     assert not app.exception
     assert app.success
     assert path.name in app.success[0].value
+
+
+def test_sidebar_shows_configured_openrouter_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _renamed_database(tmp_path)
+    monkeypatch.setenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4")
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
+    app.query_params["DB"] = str(path)
+
+    app.run(timeout=30)
+
+    assert not app.exception
+    assert any(
+        "Modelo · anthropic/claude-sonnet-4" in caption.value for caption in app.caption
+    )
 
 
 def test_invalid_runtime_path_does_not_create_file(tmp_path: Path) -> None:
