@@ -58,11 +58,12 @@ class DataAssistant:
         self,
         database_path: str | Path | None = None,
         *,
+        llm: LLMProtocol | None = None,
         schema_cache: SchemaCache | None = None,
     ) -> None:
         load_dotenv()
         self.database_path = resolve_database_path(database_path)
-        self._llm: LLMProtocol | None = None
+        self._llm = llm
         self.schema_cache = schema_cache or SchemaCache()
         self.max_sql_fix_attempts = _bounded_environment_int(
             "MAX_SQL_FIX_ATTEMPTS", 3, MAX_ALLOWED_FIX_ATTEMPTS
