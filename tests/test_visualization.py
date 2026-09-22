@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import math
+
 import plotly.graph_objects as go
 import pytest
+from dotenv import load_dotenv
 
 from data_assistant.contract import Visualization
 from data_assistant.visualization import (
     ImageExportError,
+    VisualizationRenderError,
     build_plotly_figure,
     figure_to_png,
     result_to_csv,
@@ -21,6 +25,17 @@ def test_switches_visual_type_locally_from_existing_rows() -> None:
     assert visual.x == "canal"
     assert visual.y == ["total"]
     assert visual.available_types == ["table", "bar"]
+
+
+def test_switch_to_line_infers_single_categorical_series() -> None:
+    data = [
+        {"mes": "2025-01", "canal": "App", "total": 1},
+        {"mes": "2025-01", "canal": "Loja", "total": 2},
+    ]
+    visual = visualization_for_type(data, "line", title="Tendência")
+    assert visual.group == "canal"
+    figure = build_plotly_figure(data, visual)
+    assert [trace.name for trace in figure.data] == ["App · total", "Loja · total"]
 
 
 @pytest.mark.parametrize(
@@ -75,8 +90,9 @@ def test_csv_export_is_utf8_and_preserves_columns() -> None:
 
 
 def test_png_export_returns_renderer_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(go.Figure, "to_image", lambda self, **kwargs: b"png")
-    assert figure_to_png(go.Figure()) == b"png"
+    payload = b"\x89PNG\r\n\x1a\nmock"
+    monkeypatch.setattr(go.Figure, "to_image", lambda self, **kwargs: payload)
+    assert figure_to_png(go.Figure()) == payload
 
 
 def test_png_export_failure_is_operational(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,6 +100,118 @@ def test_png_export_failure_is_operational(monkeypatch: pytest.MonkeyPatch) -> N
         raise RuntimeError("renderer stack trace should stay internal")
 
     monkeypatch.setattr(go.Figure, "to_image", fail_renderer)
-    with pytest.raises(ImageExportError, match="renderer de PNG está indisponível") as error:
+    with pytest.raises(ImageExportError, match="Falha inesperada ao exportar PNG") as error:
         figure_to_png(go.Figure())
     assert "stack trace" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (ImportError("No module named kaleido"), "Kaleido não está instalado"),
+        (type("ChromeNotFoundError", (RuntimeError,), {})("missing"), "não encontrado"),
+        (type("BrowserFailedError", (RuntimeError,), {})("crashed"), "não iniciou"),
+    ],
+)
+def test_png_export_reports_actionable_failure(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, message: str
+) -> None:
+    def fail_renderer(self: go.Figure, **kwargs: object) -> bytes:
+        raise error
+
+    monkeypatch.setattr(go.Figure, "to_image", fail_renderer)
+    with pytest.raises(ImageExportError, match=message) as caught:
+        figure_to_png(go.Figure())
+    assert "Traceback" not in str(caught.value)
+
+
+def test_png_export_rejects_non_png_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(go.Figure, "to_image", lambda self, **kwargs: b"not png")
+    with pytest.raises(ImageExportError, match="arquivo inválido"):
+        figure_to_png(go.Figure())
+
+
+def test_bars_have_external_numeric_labels_in_both_themes() -> None:
+    data = [{"canal": "App", "total": 1234.5}, {"canal": "Loja", "total": None}]
+    visual = Visualization(
+        type="bar", title="Vendas", x="canal", y=["total"], available_types=["table", "bar"]
+    )
+    for dark in (False, True):
+        trace = build_plotly_figure(data, visual, dark=dark).data[0]
+        assert isinstance(trace, go.Bar)
+        assert trace.text == ("1.234,5", "")
+        assert trace.texttemplate == "%{text}"
+        assert trace.textposition == "outside"
+        assert trace.hovertemplate is not None
+
+
+def test_line_labels_sort_chronologically_and_preserve_group_legend() -> None:
+    data = [
+        {"mes": "2025-03", "canal": "App", "total": 3},
+        {"mes": "2025-01", "canal": "Loja", "total": 4},
+        {"mes": "2025-01", "canal": "App", "total": 1},
+        {"mes": "2025-02", "canal": "App", "total": 2},
+        {"mes": "2025-02", "canal": "Loja", "total": 5},
+    ]
+    visual = Visualization(
+        type="line", title="Tendência", x="mes", y=["total"], group="canal",
+        available_types=["table", "line"],
+    )
+    figure = build_plotly_figure(data, visual)
+    app, store = figure.data
+    assert isinstance(app, go.Scatter)
+    assert isinstance(store, go.Scatter)
+    assert app.name == "App · total"
+    assert app.x == ("2025-01", "2025-02", "2025-03")
+    assert app.y == (1, 2, 3)
+    assert app.text == ("1", "2", "3")
+    assert store.name == "Loja · total"
+    assert store.x == ("2025-01", "2025-02")
+    assert store.y == (4, 5)
+    assert app.mode == "lines+markers+text"
+    assert app.textposition == "top center"
+    assert figure.layout.xaxis.type == "date"
+    assert figure.layout.xaxis.tickformat == "%Y-%m"
+
+
+def test_duplicate_period_and_group_falls_back_without_aggregation() -> None:
+    data = [
+        {"mes": "2025-01", "canal": "App", "total": 1},
+        {"mes": "2025-01", "canal": "App", "total": 2},
+    ]
+    visual = Visualization(
+        type="line", title="Tendência", x="mes", y=["total"], group="canal",
+        available_types=["table", "line"],
+    )
+    with pytest.raises(VisualizationRenderError, match="uma linha por período/série"):
+        build_plotly_figure(data, visual)
+    table = visualization_for_type(data, "table", title="Tendência")
+    assert len(build_plotly_figure(data, table).data[0].cells.values[0]) == 2
+
+
+def test_line_labels_omit_non_finite_values() -> None:
+    visual = Visualization(
+        type="line", title="Tendência", x="mes", y=["total"], available_types=["table", "line"]
+    )
+    figure = build_plotly_figure(
+        [{"mes": "2025-01", "total": math.nan}, {"mes": "2025-02", "total": 2.0}],
+        visual,
+    )
+    assert figure.data[0].text == ("", "2")
+
+
+@pytest.mark.png
+@pytest.mark.parametrize("visual_type", ["table", "bar", "line", "metric"])
+def test_real_png_export_for_all_visual_types(visual_type: str) -> None:
+    load_dotenv()
+    data = [{"mes": "2025-01", "canal": "App", "total": 1}]
+    visual = visualization_for_type(data, visual_type, title="Verificação")  # type: ignore[arg-type]
+    figure = build_plotly_figure(data, visual)
+    try:
+        payload = figure_to_png(figure)
+    except ImageExportError as exc:
+        if "Chrome/Chromium não encontrado" in str(exc):
+            pytest.skip("Chrome/Chromium não provisionado para o teste real de PNG")
+        raise
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(payload) > 100

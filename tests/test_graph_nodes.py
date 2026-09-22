@@ -129,3 +129,20 @@ def test_exhausted_error_formats_operational_contract_without_agent_call(tmp_pat
     assert formatted["response"] is not None
     assert formatted["response"].status == "error"
     assert "Traceback" not in formatted["response"].response
+
+
+def test_response_and_figure_use_only_final_result_not_prior_query(tmp_path: Path) -> None:
+    from data_assistant.visualization import build_plotly_figure
+
+    state = initial_state("Mostre a tendência")
+    state["last_result"] = [{"mes": "2025-02", "total": 2}, {"mes": "2025-01", "total": 1}]
+    state["result_history"] = [[{"mes": "2024-01", "total": 999}]]
+    state["last_error"] = "Limite de consultas atingido"
+    answer = format_response_node(state, _dependencies(_database(tmp_path)))["response"]
+
+    assert answer is not None
+    assert answer.data == state["last_result"]
+    assert answer.visualization.type == "line"
+    figure = build_plotly_figure(answer.data, answer.visualization)
+    assert figure.data[0].x == ("2025-01", "2025-02")
+    assert "2024-01" not in str(figure.to_plotly_json())

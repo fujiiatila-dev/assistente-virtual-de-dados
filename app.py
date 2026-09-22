@@ -153,10 +153,10 @@ def _cached_png(
 ) -> tuple[bytes | None, str | None]:
     data = json.loads(data_json)
     visualization = Visualization.model_validate_json(visualization_json)
-    figure = build_plotly_figure(data, visualization, dark=dark)
     try:
+        figure = build_plotly_figure(data, visualization, dark=dark)
         return figure_to_png(figure), None
-    except ImageExportError as exc:
+    except (ImageExportError, VisualizationRenderError) as exc:
         return None, str(exc)
 
 
@@ -181,18 +181,20 @@ def _render_visualization(answer: AssistantAnswer, *, key_prefix: str, theme_mod
         key=f"{key_prefix}_visual_type",
     )
     selected_type = cast(VisualizationType, selected)
-    visualization = visualization_for_type(
-        answer.data,
-        selected_type,
-        title=answer.visualization.title,
+    visualization = (
+        answer.visualization
+        if selected_type == answer.visualization.type
+        else visualization_for_type(answer.data, selected_type, title=answer.visualization.title)
     )
     dark = _is_dark_theme(theme_mode)
     try:
         figure = build_plotly_figure(answer.data, visualization, dark=dark)
     except VisualizationRenderError as exc:
         st.warning(f"Não foi possível montar o gráfico: {exc} Exibindo a tabela.")
-        st.dataframe(answer.data, use_container_width=True, hide_index=True)
-        return
+        visualization = visualization_for_type(
+            answer.data, "table", title=answer.visualization.title
+        )
+        figure = build_plotly_figure(answer.data, visualization, dark=dark)
 
     if visualization.type == "table":
         st.dataframe(answer.data, use_container_width=True, hide_index=True)

@@ -33,6 +33,7 @@ presents auditable results in Streamlit.
 - [uv](https://docs.astral.sh/uv/)
 - An OpenRouter key for live questions
 - The untracked `anexo_desafio_1.db` attachment
+- A compatible Chrome or Chromium installation for Kaleido 1.x PNG export
 
 By default, the project reads `../anexo_desafio_1.db`. Use `DB_PATH` or the `?DB=...`
 URL parameter for another compatible SQLite file. The app always opens it read-only and
@@ -117,7 +118,21 @@ Each answer includes:
 - downloads supported by the selected view.
 
 If Kaleido cannot render an image, the result remains visible and only the PNG download
-shows an operational message.
+shows an operational message. Kaleido 1.x does not bundle a browser. Install
+Chrome/Chromium once, or run `uv run plotly_get_chrome` (alternatively,
+`uv run kaleido_get_chrome`). If discovery fails, set `BROWSER_PATH` in `.env` to the full
+browser executable path. The app never downloads a browser while answering a question.
+
+Verify static export before evaluation:
+
+```powershell
+uv run python scripts/smoke_png.py
+uv run pytest -m png
+```
+
+The smoke check validates real PNG bytes in memory without writing an image file. Tests
+marked `png` skip with a clear reason when Chrome is absent; launch failures with an
+installed browser remain test failures.
 
 ## Architecture
 

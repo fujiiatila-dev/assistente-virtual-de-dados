@@ -34,6 +34,7 @@ apresenta resultados auditáveis em Streamlit.
 - [uv](https://docs.astral.sh/uv/)
 - Chave do OpenRouter para perguntas reais
 - O anexo `anexo_desafio_1.db`, mantido fora do repositório
+- Chrome ou Chromium compatível para exportar PNG com Kaleido 1.x
 
 O projeto espera o anexo em `../anexo_desafio_1.db` por padrão. É possível usar outro
 SQLite compatível via `DB_PATH` ou pelo parâmetro de URL `?DB=...`. O arquivo é sempre
@@ -119,7 +120,22 @@ Cada resposta contém:
 - downloads compatíveis com o tipo selecionado.
 
 Se o Kaleido não conseguir gerar a imagem, o resultado continua disponível e somente o
-download PNG exibe uma mensagem operacional.
+download PNG exibe uma mensagem operacional. O Kaleido 1.x não instala um navegador junto
+com o pacote. Instale Chrome/Chromium no ambiente uma vez, ou execute
+`uv run plotly_get_chrome` (alternativamente, `uv run kaleido_get_chrome`). Se o navegador
+não for detectado automaticamente, configure `BROWSER_PATH` no `.env` com o caminho
+completo do executável. O aplicativo não baixa navegadores durante uma pergunta.
+
+Confira a exportação estática antes da avaliação:
+
+```powershell
+uv run python scripts/smoke_png.py
+uv run pytest -m png
+```
+
+O smoke check confirma a assinatura de um PNG real sem gravar arquivo no projeto. Quando
+o navegador estiver ausente, o teste marcado `png` é ignorado com motivo explícito;
+falhas de inicialização com um navegador encontrado continuam sendo reportadas.
 
 ## Arquitetura
 

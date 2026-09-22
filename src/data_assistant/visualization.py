@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import io
+import math
+import re
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any, cast
 
 import plotly.graph_objects as go
@@ -184,12 +186,17 @@ def visualization_for_type(
     title: str,
 ) -> Visualization:
     """Recompute axes locally when the user changes the available visual type."""
-    return normalize_visualization(
+    visual = normalize_visualization(
         data,
         None,
         format_hint=selected_type,
         default_title=title,
     )
+    if visual.type == "line":
+        categorical, _, _ = _column_roles(data)
+        if len(categorical) == 1:
+            visual.group = categorical[0]
+    return visual
 
 
 def _series_for_group(
@@ -197,8 +204,63 @@ def _series_for_group(
 ) -> dict[str, list[Mapping[str, Any]]]:
     series: dict[str, list[Mapping[str, Any]]] = {}
     for row in data:
-        series.setdefault(str(row.get(group, "Sem grupo")), []).append(row)
+        series.setdefault(str(row.get(group) or "Sem grupo"), []).append(row)
     return series
+
+
+def _temporal_key(value: Any) -> datetime:
+    """Normalize recognized dates and months solely for ordering and duplicate checks."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, datetime.min.time())
+    elif isinstance(value, str):
+        candidate = value.strip()
+        if re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", candidate):
+            candidate += "-01"
+        try:
+            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise VisualizationRenderError(
+                "O período não contém datas ou meses reconhecíveis."
+            ) from exc
+    else:
+        raise VisualizationRenderError("O período não contém datas ou meses reconhecíveis.")
+    return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+def _line_series(
+    rows: Sequence[Mapping[str, Any]], x_column: str, y_columns: Sequence[str], group: str | None
+) -> dict[str, list[Mapping[str, Any]]]:
+    """Sort final rows per series; ambiguous period/metric pairs cannot be drawn safely."""
+    grouped = _series_for_group(rows, group) if group else {"": list(rows)}
+    prepared: dict[str, list[Mapping[str, Any]]] = {}
+    for group_name, group_rows in grouped.items():
+        dated = sorted(group_rows, key=lambda row: _temporal_key(row.get(x_column)))
+        seen: set[tuple[datetime, str]] = set()
+        for row in dated:
+            period = _temporal_key(row.get(x_column))
+            for metric in y_columns:
+                if row.get(metric) is None:
+                    continue
+                pair = (period, metric)
+                if pair in seen:
+                    raise VisualizationRenderError(
+                        "Há mais de um valor para o mesmo período e série. "
+                        "A consulta precisa retornar uma linha por período/série."
+                    )
+                seen.add(pair)
+        prepared[group_name] = dated
+    return prepared
+
+
+def _value_label(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return ""
+    if isinstance(value, float) and not math.isfinite(value):
+        return ""
+    number = f"{value:,}" if isinstance(value, int) else f"{value:,.2f}".rstrip("0").rstrip(".")
+    return number.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
 def build_plotly_figure(
@@ -240,32 +302,67 @@ def build_plotly_figure(
         y_columns = visualization.y or []
         if not x_column or not y_columns:
             raise VisualizationRenderError("A visualização requer eixos x e y.")
-        trace_type = go.Bar if visualization.type == "bar" else go.Scatter
-        trace_options = {"mode": "lines+markers"} if visualization.type == "line" else {}
         grouped = (
-            _series_for_group(rows, visualization.group) if visualization.group else {"": rows}
+            _line_series(rows, x_column, y_columns, visualization.group)
+            if visualization.type == "line"
+            else _series_for_group(rows, visualization.group) if visualization.group else {"": rows}
         )
         for group_name, group_rows in grouped.items():
             for y_column in y_columns:
-                label_parts = [part for part in (group_name, y_column) if part]
-                figure.add_trace(
-                    trace_type(
-                        x=[row.get(x_column) for row in group_rows],
-                        y=[row.get(y_column) for row in group_rows],
-                        name=" · ".join(label_parts),
-                        **trace_options,
-                    )
+                series_rows = (
+                    [row for row in group_rows if row.get(y_column) is not None]
+                    if visualization.type == "line"
+                    else group_rows
                 )
+                label_parts = [part for part in (group_name, y_column) if part]
+                trace_args = {
+                    "x": [row.get(x_column) for row in series_rows],
+                    "y": [row.get(y_column) for row in series_rows],
+                    "name": " · ".join(label_parts),
+                    "text": [_value_label(row.get(y_column)) for row in series_rows],
+                    "hovertemplate": (
+                        f"{x_column}: %{{x}}<br>{y_column}: %{{y}}<extra>%{{fullData.name}}</extra>"
+                    ),
+                    "cliponaxis": False,
+                }
+                if visualization.type == "bar":
+                    figure.add_trace(
+                        go.Bar(**trace_args, texttemplate="%{text}", textposition="outside")
+                    )
+                else:
+                    # Keep labels even in dense series; hover remains the precise view.
+                    figure.add_trace(
+                        go.Scatter(
+                            **trace_args,
+                            mode="lines+markers+text",
+                            textposition="top center",
+                        )
+                    )
     else:
         raise VisualizationRenderError("Tipo de visualização não suportado.")
 
     figure.update_layout(
         template=template,
         title=None if visualization.type == "metric" else visualization.title,
-        margin={"l": 24, "r": 24, "t": 56, "b": 32},
+        margin={"l": 48, "r": 32, "t": 80, "b": 56},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02},
         hovermode="x unified" if visualization.type == "line" else "closest",
     )
+    if visualization.type == "line":
+        temporal_column = visualization.x
+        if temporal_column is None:
+            raise VisualizationRenderError("A visualização requer um eixo temporal.")
+        figure.update_xaxes(type="date", automargin=True)
+        if all(
+            isinstance(row.get(temporal_column), str)
+            and re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", row[temporal_column].strip())
+            for row in rows
+        ):
+            figure.update_xaxes(tickformat="%Y-%m")
+        figure.update_yaxes(automargin=True)
+    elif visualization.type == "bar":
+        figure.update_xaxes(automargin=True)
+        figure.update_yaxes(automargin=True)
     return figure
 
 
@@ -281,14 +378,36 @@ def result_to_csv(data: Sequence[Mapping[str, Any]]) -> bytes:
 
 
 def figure_to_png(figure: go.Figure) -> bytes:
-    """Render a high-density PNG or return one operational export error."""
+    """Render a high-density PNG with actionable, non-traceback diagnostics."""
     try:
         payload = figure.to_image(format="png", scale=2)
     except Exception as exc:
-        raise ImageExportError(
-            "O renderer de PNG está indisponível. Instale os requisitos do Kaleido "
-            "e tente novamente."
-        ) from exc
-    if not isinstance(payload, bytes):
+        chain: list[BaseException] = []
+        current: BaseException | None = exc
+        while current is not None and current not in chain:
+            chain.append(current)
+            current = current.__cause__ or current.__context__
+        names = {type(error).__name__ for error in chain}
+        messages = " ".join(str(error).casefold() for error in chain)
+        if "ChromeNotFoundError" in names or "chrome not found" in messages:
+            message = (
+                "Chrome/Chromium não encontrado para exportar PNG. Instale-o com "
+                "plotly_get_chrome ou kaleido_get_chrome; se necessário, configure BROWSER_PATH."
+            )
+        elif "BrowserFailedError" in names or "browser failed" in messages:
+            message = (
+                "Chrome/Chromium foi encontrado, mas não iniciou para exportar PNG. "
+                "Verifique a instalação e as dependências do navegador; "
+                "se necessário, configure BROWSER_PATH."
+            )
+        elif any(isinstance(error, ImportError) for error in chain) or "kaleido" in messages:
+            message = "Kaleido não está instalado. Execute uv sync para habilitar a exportação PNG."
+        else:
+            message = (
+                "Falha inesperada ao exportar PNG. O gráfico interativo continua disponível; "
+                "verifique o ambiente do renderer."
+            )
+        raise ImageExportError(message) from exc
+    if not isinstance(payload, bytes) or not payload.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ImageExportError("O renderer de PNG retornou um arquivo inválido.")
     return payload

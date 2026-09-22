@@ -40,6 +40,7 @@ testpaths = ["tests"]
 markers = [
     "llm: testes que fazem chamadas reais ao OpenRouter",
     "integration: testes que dependem do anexo SQLite local",
+    "png: testes de exportação estática que dependem de Chrome/Chromium local",
 ]
 
 [tool.ruff]
