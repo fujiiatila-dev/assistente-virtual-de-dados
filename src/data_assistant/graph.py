@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from data_assistant.contract import AssistantAnswer
+from data_assistant.errors import LLMOperationalError, OperationalCode
 from data_assistant.prompts import (
     correct_sql_prompt,
     format_answer_prompt,
@@ -57,6 +58,7 @@ class AgentState(TypedDict):
     sufficient: bool
     interpretation: dict[str, Any]
     warnings: list[str]
+    operational_error: OperationalCode | None
     response: AssistantAnswer | None
 
 
@@ -93,6 +95,7 @@ def initial_state(
         sufficient=False,
         interpretation={},
         warnings=[],
+        operational_error=None,
         response=None,
     )
 
@@ -252,7 +255,13 @@ def evaluate_sufficiency_node(state: AgentState, dependencies: GraphDependencies
         sufficient, reason = False, "Resultado vazio para uma pergunta quantitativa."
     else:
         prompt = sufficiency_prompt(state["question"], state["last_sql"], result)
-        assessment = dependencies.llm.complete_json(prompt.system, prompt.user)
+        try:
+            assessment = dependencies.llm.complete_json(prompt.system, prompt.user)
+        except LLMOperationalError as exc:
+            updated["operational_error"] = exc.code
+            updated["warnings"].append(str(exc))
+            _record(updated, "avaliar_suficiencia", "Avaliação interrompida pelo provedor.")
+            return updated
         sufficient = bool(assessment.get("sufficient"))
         reason = str(assessment.get("reason") or "Avaliação concluída.")
     updated["sufficient"] = sufficient
@@ -271,9 +280,15 @@ def refine_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agent
         state["interpretation"],
         prior_rows,
     )
-    updated["last_sql"] = _strip_sql_fence(
-        dependencies.llm.complete(prompt.system, prompt.user)
-    )
+    try:
+        updated["last_sql"] = _strip_sql_fence(
+            dependencies.llm.complete(prompt.system, prompt.user)
+        )
+    except LLMOperationalError as exc:
+        updated["operational_error"] = exc.code
+        updated["warnings"].append(str(exc))
+        _record(updated, "refinar_consulta", "Refinamento interrompido pelo provedor.")
+        return updated
     updated["last_error"] = None
     _record(updated, "refinar_consulta", "Consulta complementar gerada.", sql=updated["last_sql"])
     return updated
@@ -296,7 +311,7 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
     updated = _copied(state)
     result = state["last_result"] or []
     exhausted_with_error = bool(state["last_error"])
-    if exhausted_with_error:
+    if state["operational_error"] or exhausted_with_error:
         status = "partial" if result else "error"
     elif not state["sufficient"] and state["query_budget"] <= 0:
         status = "partial"
@@ -307,7 +322,7 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
 
     proposal: Mapping[str, Any] | None = None
     response_text = _fallback_response(state, status)
-    if not exhausted_with_error:
+    if not exhausted_with_error and not state["operational_error"]:
         available_types = compatible_visualization_types(result)
         prompt = format_answer_prompt(
             state["question"],
@@ -321,6 +336,10 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
             response_text = str(payload.get("response") or response_text)
             raw_proposal = payload.get("visualization")
             proposal = raw_proposal if isinstance(raw_proposal, Mapping) else None
+        except LLMOperationalError as exc:
+            updated["operational_error"] = exc.code
+            updated["warnings"].append(str(exc))
+            status = "partial" if result else "error"
         except Exception:
             updated["warnings"].append(
                 "A formatação automática falhou; foi aplicada uma apresentação determinística."
@@ -341,6 +360,7 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
         queries=updated["queries"],
         steps=updated["steps"],
         warnings=updated["warnings"],
+        operational_code=updated["operational_error"],
     )
     return updated
 
@@ -372,9 +392,13 @@ def route_after_execution(state: AgentState, *, max_fix_attempts: int = 3) -> Ex
 
 def route_after_sufficiency(state: AgentState) -> SufficiencyRoute:
     """Refine successful but insufficient results while budget remains."""
-    if state["sufficient"] or state["query_budget"] <= 0:
+    if state["operational_error"] or state["sufficient"] or state["query_budget"] <= 0:
         return "formatar_resposta"
     return "refinar_consulta"
+
+
+def route_after_refinement(state: AgentState) -> Literal["validar_sql", "formatar_resposta"]:
+    return "formatar_resposta" if state["operational_error"] else "validar_sql"
 
 
 def build_graph(
@@ -416,6 +440,6 @@ def build_graph(
     )
     workflow.add_edge("corrigir_sql", "validar_sql")
     workflow.add_conditional_edges("avaliar_suficiencia", route_after_sufficiency)
-    workflow.add_edge("refinar_consulta", "validar_sql")
+    workflow.add_conditional_edges("refinar_consulta", route_after_refinement)
     workflow.add_edge("formatar_resposta", END)
     return workflow.compile(name="data-assistant")

@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from data_assistant.errors import OperationalCode
+
 VisualizationType = Literal["line", "bar", "table", "metric"]
 AnswerStatus = Literal["success", "empty", "partial", "error"]
 
@@ -47,6 +49,7 @@ class AssistantAnswer(BaseModel):
     queries: list[str] = Field(default_factory=list)
     steps: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    operational_code: OperationalCode | None = None
 
     @model_validator(mode="after")
     def fallback_when_columns_are_missing(self) -> AssistantAnswer:

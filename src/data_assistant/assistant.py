@@ -8,10 +8,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from data_assistant.configuration import PublicRuntimeSettings
 from data_assistant.contract import AssistantAnswer, Visualization
+from data_assistant.errors import LLMOperationalError, OperationalCode
 from data_assistant.executor import SQLiteExecutor
 from data_assistant.graph import GraphDependencies, LLMProtocol, build_graph, initial_state
-from data_assistant.llm import MissingAPIKeyError, OpenRouterLLM
+from data_assistant.llm import LLMSettings, OpenRouterLLM
+from data_assistant.quota import QuotaStore
 from data_assistant.schema import SchemaCache, SchemaDiscoveryError, discover_schema
 
 DEFAULT_DATABASE_PATH = Path("../anexo_desafio_1.db")
@@ -38,7 +41,12 @@ def _bounded_environment_int(name: str, default: int, maximum: int) -> int:
     return min(max(value, 1), maximum)
 
 
-def _error_answer(message: str, *, warning: str | None = None) -> AssistantAnswer:
+def _error_answer(
+    message: str,
+    *,
+    warning: str | None = None,
+    operational_code: OperationalCode | None = None,
+) -> AssistantAnswer:
     return AssistantAnswer(
         status="error",
         response=message,
@@ -48,6 +56,7 @@ def _error_answer(message: str, *, warning: str | None = None) -> AssistantAnswe
             available_types=["table"],
         ),
         warnings=[warning] if warning else [],
+        operational_code=operational_code,
     )
 
 
@@ -59,11 +68,15 @@ class DataAssistant:
         database_path: str | Path | None = None,
         *,
         llm: LLMProtocol | None = None,
+        llm_settings: LLMSettings | None = None,
         schema_cache: SchemaCache | None = None,
     ) -> None:
         load_dotenv()
+        if llm is not None and llm_settings is not None:
+            raise ValueError("Forneça llm ou llm_settings, nunca ambos.")
         self.database_path = resolve_database_path(database_path)
         self._llm = llm
+        self._llm_settings = llm_settings
         self.schema_cache = schema_cache or SchemaCache()
         self.max_sql_fix_attempts = _bounded_environment_int(
             "MAX_SQL_FIX_ATTEMPTS", 3, MAX_ALLOWED_FIX_ATTEMPTS
@@ -74,7 +87,18 @@ class DataAssistant:
 
     def _model(self) -> LLMProtocol:
         if self._llm is None:
-            self._llm = OpenRouterLLM()
+            if self._llm_settings is not None:
+                self._llm = OpenRouterLLM(self._llm_settings)
+            else:
+                settings = LLMSettings.for_server_key()
+                settings.require_api_key()
+                runtime = PublicRuntimeSettings.from_environment()
+                quota = QuotaStore(
+                    runtime.quota_db_path, source_database=self.database_path
+                )
+                self._llm = OpenRouterLLM(
+                    settings, quota_store=quota, daily_limit=runtime.free_daily_request_limit
+                )
         return self._llm
 
     def ask(self, question: str, format_hint: str | None = None) -> AssistantAnswer:
@@ -108,18 +132,20 @@ class DataAssistant:
             if not isinstance(answer, AssistantAnswer):
                 return _error_answer("O fluxo terminou sem produzir uma resposta válida.")
             return answer
-        except MissingAPIKeyError as exc:
-            return _error_answer(str(exc))
+        except LLMOperationalError as exc:
+            return _error_answer(str(exc), operational_code=exc.code)
         except SchemaDiscoveryError as exc:
             return _error_answer(
                 str(exc),
                 warning="Confirme se DB aponta para um arquivo SQLite legível.",
+                operational_code="local_error",
             )
         except Exception as exc:
             logger.error("Falha operacional no grafo: %s", type(exc).__name__)
             return _error_answer(
                 "Não foi possível processar a pergunta. Confira o banco, a chave do modelo "
-                "e tente novamente."
+                "e tente novamente.",
+                operational_code="local_error",
             )
 
 

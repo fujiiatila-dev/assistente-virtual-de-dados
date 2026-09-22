@@ -58,3 +58,20 @@ def test_answer_contract_falls_back_when_referenced_column_is_missing() -> None:
     assert answer.warnings == [
         "Visualização solicitada incompatível com as colunas; exibindo tabela."
     ]
+
+
+def test_operational_code_preserves_existing_public_contract() -> None:
+    answer = AssistantAnswer(
+        status="partial",
+        response="Consulta parcial.",
+        visualization=Visualization(type="table", title="Dados"),
+        data=[{"total": 2}],
+        warnings=["Cota encerrada."],
+        operational_code="quota_exhausted",
+    )
+
+    payload = answer.model_dump()
+    assert payload["status"] == "partial"
+    assert payload["warnings"] == ["Cota encerrada."]
+    assert payload["visualization"]["available_types"] == ["table"]
+    assert payload["operational_code"] == "quota_exhausted"

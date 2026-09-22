@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from data_assistant.assistant import DataAssistant, resolve_database_path
+from data_assistant.errors import QuotaExceededError
 
 
 @pytest.fixture
@@ -72,3 +74,18 @@ def test_valid_question_requires_real_openrouter_configuration(
     assert answer.status == "error"
     assert "OPENROUTER_API_KEY" in answer.response
     assert answer.queries == []
+
+
+def test_quota_error_returns_typed_operational_answer(assistant_db: Path) -> None:
+    class ExhaustedLLM:
+        def complete(self, system_prompt: str, user_prompt: str) -> str:
+            raise QuotaExceededError()
+
+        def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+            raise QuotaExceededError()
+
+    answer = DataAssistant(assistant_db, llm=ExhaustedLLM()).ask("Quais são os registros?")
+    assert answer.status == "error"
+    assert answer.operational_code == "quota_exhausted"
+    assert "chave própria" in answer.response
+    assert "Traceback" not in answer.response
