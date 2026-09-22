@@ -5,6 +5,10 @@ import pytest
 from data_assistant.llm import DEFAULT_MODEL, LLMSettings, resolve_model_name
 
 
+def test_default_model_uses_openrouter_free_router() -> None:
+    assert DEFAULT_MODEL == "openrouter/free"
+
+
 @pytest.mark.parametrize("configured", [None, "", "   "])
 def test_model_name_falls_back_to_default(
     configured: str | None, monkeypatch: pytest.MonkeyPatch

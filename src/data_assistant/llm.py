@@ -11,7 +11,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-DEFAULT_MODEL: Final = "google/gemini-2.5-flash"
+# OpenRouter's free router selects an available free model that supports the
+# capabilities requested by this application, including structured output.
+DEFAULT_MODEL: Final = "openrouter/free"
 DEFAULT_BASE_URL: Final = "https://openrouter.ai/api/v1"
 
 

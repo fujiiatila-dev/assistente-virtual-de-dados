@@ -14,8 +14,9 @@ apresenta resultados auditáveis em Streamlit.
 
 - Grafo explícito: interpretar → descobrir schema → gerar → validar → executar →
   corrigir/refinar → formatar.
-- OpenRouter por API compatível com OpenAI; modelo padrão
-  `google/gemini-2.5-flash`.
+- OpenRouter por API compatível com OpenAI; o padrão é o roteador gratuito
+  `openrouter/free`, que seleciona um modelo gratuito disponível com suporte às
+  saídas estruturadas usadas pelo agente.
 - Schema dinâmico com tabelas, colunas extras, chaves estrangeiras e amostras de valores
   categóricos.
 - SQLite em `mode=ro`, `query_only=ON`, limite máximo de 200 linhas, timeout, até seis
@@ -49,7 +50,7 @@ Preencha apenas a chave no `.env`:
 
 ```dotenv
 OPENROUTER_API_KEY=sua-chave-local
-OPENROUTER_MODEL=google/gemini-2.5-flash
+OPENROUTER_MODEL=openrouter/free
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 DB_PATH=../anexo_desafio_1.db
 MAX_SQL_FIX_ATTEMPTS=3
@@ -58,6 +59,12 @@ MAX_QUERY_BUDGET=6
 
 O `.env`, bancos, logs, caches, CSVs e PNGs são ignorados pelo Git. Em redes com uma
 autoridade certificadora corporativa, execute `uv sync --system-certs`.
+
+O roteador gratuito não cobra por tokens, mas ainda exige uma chave do OpenRouter e está
+sujeito aos limites diários do plano gratuito. Como ele pode selecionar modelos diferentes
+ao longo do tempo, a resposta pode variar; para comportamento mais estável, é possível
+definir no `.env` um modelo gratuito específico depois de validá-lo. Use somente dados sem
+informações sensíveis, pois as políticas de retenção dos provedores gratuitos podem variar.
 
 ## Validar o anexo
 

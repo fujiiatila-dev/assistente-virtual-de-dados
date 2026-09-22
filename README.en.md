@@ -14,8 +14,9 @@ presents auditable results in Streamlit.
 
 - Explicit graph: interpret → discover schema → generate → validate → execute →
   correct/refine → format.
-- OpenRouter through an OpenAI-compatible API; default model
-  `google/gemini-2.5-flash`.
+- OpenRouter through an OpenAI-compatible API; the default is the free router
+  `openrouter/free`, which selects an available free model supporting the structured
+  outputs used by the agent.
 - Dynamic schema metadata, extra columns, foreign keys, and categorical value samples.
 - SQLite `mode=ro`, `query_only=ON`, a 200-row cap, query timeout, up to six queries,
   and up to three correction attempts after the initial query.
@@ -48,7 +49,7 @@ Set the local key in `.env`:
 
 ```dotenv
 OPENROUTER_API_KEY=your-local-key
-OPENROUTER_MODEL=google/gemini-2.5-flash
+OPENROUTER_MODEL=openrouter/free
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 DB_PATH=../anexo_desafio_1.db
 MAX_SQL_FIX_ATTEMPTS=3
@@ -57,6 +58,12 @@ MAX_QUERY_BUDGET=6
 
 `.env`, databases, logs, caches, CSVs, and PNGs are ignored by Git. On networks with a
 corporate certificate authority, run `uv sync --system-certs`.
+
+The free router does not charge per token, but it still requires an OpenRouter key and is
+subject to the free plan's daily limits. Because it may select different models over time,
+responses can vary; for more stable behavior, set a specific free model in `.env` after
+validating it. Send only non-sensitive data, since retention policies may differ across
+free providers.
 
 ## Validate the attachment
 
