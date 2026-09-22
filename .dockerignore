@@ -1,0 +1,15 @@
+# Allow only the reproducible runtime inputs into the image build context.
+*
+!Dockerfile
+!app.py
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+!scripts/
+!scripts/**
+!assets/
+!assets/**
+!.streamlit/
+!.streamlit/config.toml

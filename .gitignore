@@ -40,6 +40,8 @@ dist/
 build/
 reports/
 codex-security-results/
+/runtime/
+*.sarif
 
 # IDE, sistema e notebooks locais
 .idea/
