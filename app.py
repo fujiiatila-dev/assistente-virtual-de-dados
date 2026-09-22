@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,7 +11,7 @@ import streamlit as st
 
 from data_assistant.assistant import DataAssistant, resolve_database_path
 from data_assistant.contract import AssistantAnswer, Visualization, VisualizationType
-from data_assistant.llm import resolve_model_name
+from data_assistant.llm import LLMSettings, resolve_model_name
 from data_assistant.visualization import (
     ImageExportError,
     VisualizationRenderError,
@@ -134,15 +135,88 @@ def _initialize_session(database_path: Path) -> None:
         st.session_state.messages = []
     stored_path = st.session_state.get("assistant_database_path")
     if "assistant" not in st.session_state or stored_path != str(database_path):
-        st.session_state.assistant = DataAssistant(database_path)
+        personal_key = st.session_state.get("byok_api_key")
+        settings = LLMSettings.for_session_key(personal_key) if personal_key else None
+        st.session_state.assistant = DataAssistant(database_path, llm_settings=settings)
         st.session_state.assistant_database_path = str(database_path)
 
 
+def _activate_session_key(
+    session: MutableMapping[str, Any], key: str, database_path: Path
+) -> bool:
+    """Keep a visitor credential only in this Streamlit session and its assistant."""
+    clean_key = key.strip()
+    if not clean_key or len(clean_key) > 512:
+        return False
+    session["byok_api_key"] = clean_key
+    session["assistant"] = DataAssistant(
+        database_path, llm_settings=LLMSettings.for_session_key(clean_key)
+    )
+    session["assistant_database_path"] = str(database_path)
+    session["byok_invalid"] = False
+    return True
+
+
+def _clear_session_key(session: MutableMapping[str, Any], database_path: Path) -> None:
+    """Discard both the widget value and clients that retain the visitor key."""
+    for name in ("byok_api_key", "byok_key_input", "byok_invalid", "pending_question"):
+        session.pop(name, None)
+    session["assistant"] = DataAssistant(database_path)
+    session["assistant_database_path"] = str(database_path)
+
+
+@st.dialog("Continuar com minha chave OpenRouter")
+def _byok_dialog(database_path: Path) -> None:
+    issue = (
+        "Sua chave atual foi rejeitada ou chegou ao limite gratuito. "
+        if st.session_state.get("byok_invalid")
+        else "A cota gratuita compartilhada terminou. "
+    )
+    st.markdown(
+        issue + "Crie uma chave OpenRouter dedicada "
+        "em [Chaves da OpenRouter](https://openrouter.ai/settings/keys), de preferência "
+        "com limite de gasto ou expiração. A chave chega a este servidor para fazer "
+        "as chamadas ao modelo gratuito e fica somente na memória desta sessão."
+    )
+    candidate = st.text_input(
+        "Chave OpenRouter desta sessão",
+        type="password",
+        key="byok_key_input",
+        max_chars=512,
+        help="Não use uma chave principal sem limite de gasto.",
+    )
+    if st.button("Usar chave nesta sessão", type="primary"):
+        if not _activate_session_key(st.session_state, candidate, database_path):
+            st.error("Informe uma chave OpenRouter válida antes de continuar.")
+            return
+        st.rerun()
+
+
+def _render_byok_controls(database_path: Path) -> str | None:
+    """Offer a dialog after quota failure; retry only after an explicit click."""
+    pending = st.session_state.get("pending_question")
+    if not isinstance(pending, str) or not pending:
+        return None
+    if st.session_state.get("byok_api_key") and not st.session_state.get("byok_invalid"):
+        st.info("Sua chave está ativa apenas nesta sessão. A pergunta não será repetida sozinha.")
+        if st.button("Repetir pergunta pendente", key="byok_retry"):
+            st.session_state.pop("pending_question", None)
+            return pending
+        return None
+    st.caption("A consulta não será repetida até você escolher continuar.")
+    label = (
+        "Trocar chave"
+        if st.session_state.get("byok_invalid")
+        else "Continuar com minha chave"
+    )
+    if st.button(label, key="byok_open_dialog"):
+        _byok_dialog(database_path)
+    return None
+
+
 def _query_database_path() -> Path:
-    runtime_db = st.query_params.get("DB")
-    if isinstance(runtime_db, list):
-        runtime_db = runtime_db[-1] if runtime_db else None
-    return resolve_database_path(runtime_db)
+    """Use only the operator-configured source, never visitor URL parameters."""
+    return resolve_database_path()
 
 
 @st.cache_data(show_spinner=False)
@@ -292,6 +366,11 @@ def _sidebar(database_path: Path) -> tuple[str | None, str]:
             st.error(f"Banco ausente · {database_path.name}", icon="⚠️")
             st.caption("Configure DB_PATH no arquivo .env e reinicie a aplicação.")
         st.caption(f"Modelo · {resolve_model_name()}")
+        if st.session_state.get("byok_api_key"):
+            st.caption("Chave própria ativa somente nesta sessão")
+            if st.button("Limpar minha chave", key="byok_clear"):
+                _clear_session_key(st.session_state, database_path)
+                st.rerun()
         theme_mode = st.selectbox(
             "Tema",
             options=("System", "Light", "Dark"),
@@ -344,6 +423,8 @@ def main() -> None:
 
     messages: list[dict[str, Any]] = st.session_state.messages
     _render_history(messages, theme_mode)
+    had_pending = bool(st.session_state.get("pending_question"))
+    retry_question = _render_byok_controls(database_path)
     if not messages:
         st.markdown(
             """
@@ -360,7 +441,7 @@ def main() -> None:
         "Pergunte sobre clientes, compras, suporte ou campanhas",
         disabled=not database_path.is_file(),
     )
-    question = selected_question or typed_question
+    question = retry_question or selected_question or typed_question
     if not question:
         return
 
@@ -373,6 +454,14 @@ def main() -> None:
             answer = assistant.ask(question)
         _render_answer(answer, key_prefix=f"answer_{len(messages)}", theme_mode=theme_mode)
     messages.append({"role": "assistant", "content": answer.response, "answer": answer})
+    if answer.operational_code in ("quota_exhausted", "invalid_key"):
+        st.session_state.pending_question = question
+        if answer.operational_code == "invalid_key" or (
+            answer.operational_code == "quota_exhausted" and st.session_state.get("byok_api_key")
+        ):
+            st.session_state.byok_invalid = True
+        if not had_pending:
+            _render_byok_controls(database_path)
 
 
 if __name__ == "__main__":
