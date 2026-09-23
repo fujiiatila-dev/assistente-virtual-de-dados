@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout completo para varredura de segredos
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Python 3.11
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Dependências congeladas
+        run: uv sync --locked
+
+      - name: Testes determinísticos sem OpenRouter
+        run: uv run pytest -m 'not llm'
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy
+        run: uv run mypy src/
+
+      - name: Validar anexo se estiver disponível fora do checkout
+        run: |
+          if test -f ../anexo_desafio_1.db; then
+            uv run python scripts/validate_dataset.py --db ../anexo_desafio_1.db
+          else
+            echo "Anexo externo ausente no runner; testes sintéticos cobrem o contrato."
+          fi
+
+      - name: Detectar segredos no histórico
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

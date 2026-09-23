@@ -29,11 +29,11 @@ services:
       - public
     image: cloudflare/cloudflared:2026.9.1
     command: tunnel --no-autoupdate run
+    env_file:
+      - path: ./runtime/tunnel.env
+        required: false
     environment:
-      TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token
       TUNNEL_LOGLEVEL: warn
-    secrets:
-      - tunnel_token
     depends_on:
       app:
         condition: service_healthy
@@ -43,7 +43,3 @@ services:
 
 networks:
   assistant_net: {}
-
-secrets:
-  tunnel_token:
-    file: ${TUNNEL_TOKEN_FILE:-./runtime/tunnel.token}
