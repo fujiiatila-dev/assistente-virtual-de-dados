@@ -155,6 +155,17 @@ somente leitura e um diretório de runtime separado; não publica a porta 8501. 
 perfil `public` liga o Cloudflare Tunnel à rede interna do Compose. Variáveis,
 token do Tunnel e banco ficam fora da imagem e do Git.
 
+Para avaliar no navegador **desta máquina**, use o override local explícito:
+
+```powershell
+docker compose -f compose.yaml -f compose.local.yaml up -d --build app
+```
+
+Abra http://127.0.0.1:8501. O override publica a porta somente em loopback; não o
+use no servidor público. Para parar: `docker compose -f compose.yaml -f
+compose.local.yaml stop app`. Sem o override, `8501/tcp` em `docker compose ps`
+indica apenas uma porta interna, não um endereço acessível no host.
+
 O [runbook de publicação](DEPLOYMENT.md) descreve inventário DNS, provisionamento
 Ubuntu/Debian, chave SSH de deploy dedicada, GitHub Actions/GHCR, verificações de
 saúde e rollback. A publicação remota só é habilitada com `PRODUCTION_READY=true`

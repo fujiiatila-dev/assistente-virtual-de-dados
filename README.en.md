@@ -153,6 +153,17 @@ read-only and a separate runtime directory; it does not publish port 8501. The
 Environment variables, the Tunnel token, and the database remain outside the image
 and Git.
 
+For a browser preview **on this machine**, use the explicit local override:
+
+```powershell
+docker compose -f compose.yaml -f compose.local.yaml up -d --build app
+```
+
+Open http://127.0.0.1:8501. This binds the port to loopback only; do not use the
+override on the public server. Stop it with `docker compose -f compose.yaml -f
+compose.local.yaml stop app`. Without the override, `8501/tcp` in `docker compose
+ps` means an internal container port, not a host-accessible address.
+
 The [deployment runbook](DEPLOYMENT.md) covers DNS inventory, Ubuntu/Debian
 provisioning, a dedicated SSH deploy key, GitHub Actions/GHCR, health checks, and
 rollback. Remote deployment is enabled only with `PRODUCTION_READY=true` after

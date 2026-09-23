@@ -1,0 +1,5 @@
+# Explicit local preview only. Never include this file in the public server command.
+services:
+  app:
+    ports:
+      - "127.0.0.1:8501:8501"
