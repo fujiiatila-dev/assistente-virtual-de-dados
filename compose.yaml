@@ -1,0 +1,49 @@
+services:
+  app:
+    image: ${APP_IMAGE:-data-assistant:local}
+    build: .
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /data/source.sqlite3
+      QUOTA_DB_PATH: /app/runtime/quota.sqlite3
+      BROWSER_PATH: /usr/bin/chromium
+    volumes:
+      - type: bind
+        source: ${HOST_DB_PATH:-../anexo_desafio_1.db}
+        target: /data/source.sqlite3
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RUNTIME_DIR:-./runtime}
+        target: /app/runtime
+    expose:
+      - "8501"
+    networks:
+      - assistant_net
+    restart: unless-stopped
+
+  cloudflared:
+    profiles:
+      - public
+    image: cloudflare/cloudflared:2026.9.1
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token
+      TUNNEL_LOGLEVEL: warn
+    secrets:
+      - tunnel_token
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - assistant_net
+    restart: unless-stopped
+
+networks:
+  assistant_net: {}
+
+secrets:
+  tunnel_token:
+    file: ${TUNNEL_TOKEN_FILE:-./runtime/tunnel.token}
