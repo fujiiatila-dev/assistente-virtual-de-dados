@@ -28,6 +28,17 @@ def test_invalid_type_or_columns_fall_back_to_table() -> None:
     assert invalid_columns.available_types == ["table", "bar", "metric"]
 
 
+def test_generic_model_table_uses_shape_derived_default_without_explicit_hint() -> None:
+    scalar = [{"clientes": 33, "interacoes": 17, "envios": 35}]
+    comparison = [{"categoria": "Roupas", "media": 2.21}, {"categoria": "Livros", "media": 1.98}]
+
+    assert normalize_visualization(scalar, {"type": "table"}).type == "metric"
+    assert normalize_visualization(comparison, {"type": "table"}).type == "bar"
+    assert normalize_visualization(
+        comparison, {"type": "table"}, format_hint="mostre como tabela"
+    ).type == "table"
+
+
 def test_explicit_valid_format_has_priority_without_new_data() -> None:
     data = [{"categoria": "Livros", "total": 8}, {"categoria": "Roupas", "total": 4}]
     visual = normalize_visualization(

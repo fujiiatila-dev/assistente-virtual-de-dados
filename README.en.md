@@ -2,13 +2,27 @@
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![uv](https://img.shields.io/badge/deps-uv-5C4EE5)
-![tests](https://img.shields.io/badge/tests-62%20cases-16803A)
 
 A natural-language business data assistant for SQLite. It discovers the schema at
 runtime, generates and corrects SQL with LangGraph, enforces read-only execution, and
 presents auditable results in Streamlit.
 
 [Versão em português](README.md)
+
+## Online evaluation
+
+The public demonstration URL is **https://avaliacao.nalk.com.br**. It will be open
+without login or email once server and DNS provisioning is complete. Publication is
+still pending that operational step; use the local instructions below until the URL
+is live.
+
+The demonstration dataset is fictional. The assistant uses `openrouter/free` with a
+shared key and a guarded daily quota. If that quota is exhausted, the UI can request
+the visitor's own OpenRouter key (BYOK) for the current session only, after explicit
+confirmation. That key is sent to the backend to call the provider and is not
+persisted by the application. A dedicated key with a spending limit and/or expiry
+is recommended. Tables can be downloaded as CSV and PNG; bar, line, and metric
+views as PNG.
 
 ## Included
 
@@ -35,9 +49,9 @@ presents auditable results in Streamlit.
 - The untracked `anexo_desafio_1.db` attachment
 - A compatible Chrome or Chromium installation for Kaleido 1.x PNG export
 
-By default, the project reads `../anexo_desafio_1.db`. Use `DB_PATH` or the `?DB=...`
-URL parameter for another compatible SQLite file. The app always opens it read-only and
-never copies it.
+By default, the project reads `../anexo_desafio_1.db`. Set `DB_PATH` before starting
+the local process to use another compatible SQLite file. The app always opens it
+read-only and never copies it.
 
 ## Setup
 
@@ -50,9 +64,9 @@ Set the local key in `.env`:
 
 ```dotenv
 OPENROUTER_API_KEY=your-local-key
-OPENROUTER_MODEL=openrouter/free
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 DB_PATH=../anexo_desafio_1.db
+OPENROUTER_FREE_DAILY_REQUEST_LIMIT=45
 MAX_SQL_FIX_ATTEMPTS=3
 MAX_QUERY_BUDGET=6
 ```
@@ -60,11 +74,11 @@ MAX_QUERY_BUDGET=6
 `.env`, databases, logs, caches, CSVs, and PNGs are ignored by Git. On networks with a
 corporate certificate authority, run `uv sync --system-certs`.
 
-The free router does not charge per token, but it still requires an OpenRouter key and is
-subject to the free plan's daily limits. Because it may select different models over time,
-responses can vary; for more stable behavior, set a specific free model in `.env` after
-validating it. Send only non-sensitive data, since retention policies may differ across
-free providers.
+The free router still requires an OpenRouter key and is subject to provider limits.
+The public flow uses only `openrouter/free`, including BYOK; the router may choose
+different models over time. The local quota counts each actual model call, not each
+question, and the shared daily limit is configurable. Send only non-sensitive data,
+since free providers' policies may differ.
 
 ## Validate the attachment
 
@@ -94,20 +108,16 @@ configured key, start the UI:
 uv run streamlit run app.py
 ```
 
-Select another source for one session with a URL such as:
-
-```text
-http://localhost:8501/?DB=C:/data/customers.db
-```
-
-`DB` takes priority over `DB_PATH`. Missing or invalid files produce an actionable UI
-message without creating or overwriting a file.
+To change the local source, edit `DB_PATH` in `.env` and restart the app. The public
+UI does not accept database paths through the URL. Missing or invalid files produce
+an actionable message without creating or overwriting a file.
 
 ## Interface
 
-The sidebar shows the source and model, exposes five demo questions, and offers `System`,
-`Light`, and `Dark` themes. `System` follows the browser. Overrides update owned surfaces
-and charts while native controls preserve Streamlit's theme behavior.
+The sidebar shows the source and model and exposes five demo questions. The UI
+automatically follows the system light/dark theme; there is no theme selector. The
+robot is both favicon and top brand mark, and the loading indicator respects reduced
+motion preferences.
 
 Each answer includes:
 
@@ -133,6 +143,20 @@ uv run pytest -m png
 The smoke check validates real PNG bytes in memory without writing an image file. Tests
 marked `png` skip with a clear reason when Chrome is absent; launch failures with an
 installed browser remain test failures.
+
+## Docker and deployment
+
+`docker build -t data-assistant:test .` creates a non-root image with Chromium and
+runs the PNG smoke check during build. `compose.yaml` mounts the external attachment
+read-only and a separate runtime directory; it does not publish port 8501. The
+`public` profile connects Cloudflare Tunnel to the internal Compose network.
+Environment variables, the Tunnel token, and the database remain outside the image
+and Git.
+
+The [deployment runbook](DEPLOYMENT.md) covers DNS inventory, Ubuntu/Debian
+provisioning, a dedicated SSH deploy key, GitHub Actions/GHCR, health checks, and
+rollback. Remote deployment is enabled only with `PRODUCTION_READY=true` after
+server preflight. Do not start the public profile before completing the runbook.
 
 ## Architecture
 
@@ -164,8 +188,7 @@ flowchart LR
 | `visualization.py` | Compatibility, fallback, Plotly, and exports |
 | `assistant.py` | Public API and operational error handling |
 
-Architecture decisions are captured in ADRs 001–008 in the project's architecture
-materials.
+Architecture decisions are captured in ADRs 001–010 in local architecture materials.
 
 ## Attachment questions and results
 
@@ -200,7 +223,8 @@ uv run pytest -m llm
 
 ## Known limits and next steps
 
-- The Streamlit process is single-user; an HTTP API is a future multi-client extension.
+- Streamlit supports independent sessions, but this deployment has one app process;
+  horizontal scaling would require coordinated abuse limits.
 - The full schema is sent to the model; semantic table selection or schema RAG becomes
   useful for large databases.
 - The intentionally small visual menu has four types; filters and composed charts are

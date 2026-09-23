@@ -146,6 +146,10 @@ def normalize_visualization(
         selected = hinted
     elif invalid_proposal:
         selected = "table"
+    elif proposed == "table" and len(available) > 1:
+        # A generic model table is not an explicit user preference. Prefer the
+        # shape-derived visual; callers can still select the table without a query.
+        selected = _default_type(available)
     else:
         selected = proposed or _default_type(available)
 

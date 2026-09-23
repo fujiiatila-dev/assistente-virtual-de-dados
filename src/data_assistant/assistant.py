@@ -122,7 +122,7 @@ class DataAssistant:
         if not self.database_path.is_file():
             return _error_answer(
                 f"Banco SQLite não encontrado em: {self.database_path}",
-                warning="Configure DB_PATH ou informe o parâmetro DB com um arquivo existente.",
+                warning="Configure DB_PATH com um arquivo SQLite existente e reinicie a aplicação.",
             )
 
         gate = global_concurrency_gate(self.runtime_limits.max_concurrent_questions)
@@ -178,7 +178,7 @@ class DataAssistant:
         except SchemaDiscoveryError as exc:
             return _error_answer(
                 str(exc),
-                warning="Confirme se DB aponta para um arquivo SQLite legível.",
+                warning="Confirme se DB_PATH aponta para um arquivo SQLite legível.",
                 operational_code="local_error",
             )
         except Exception as exc:

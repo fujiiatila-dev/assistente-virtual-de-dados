@@ -2,13 +2,27 @@
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![uv](https://img.shields.io/badge/deps-uv-5C4EE5)
-![testes](https://img.shields.io/badge/testes-62%20casos-16803A)
 
 Assistente em linguagem natural para perguntas de negócio sobre um SQLite. O produto
 descobre o schema em runtime, gera e corrige SQL com LangGraph, executa somente leitura e
 apresenta resultados auditáveis em Streamlit.
 
 [English version](README.en.md)
+
+## Avaliação online
+
+O endereço público da demonstração é **https://avaliacao.nalk.com.br**. O acesso será
+livre, sem login ou e-mail, assim que o provisionamento do servidor e do DNS terminar.
+No momento, a publicação ainda depende dessa etapa operacional; use as instruções
+locais abaixo enquanto o endereço não estiver ativo.
+
+A base disponibilizada na demonstração é fictícia. O assistente usa
+`openrouter/free` com uma chave compartilhada e uma cota diária de segurança. Se a
+cota acabar, a interface pode solicitar uma chave OpenRouter própria (BYOK) somente
+para a sessão atual, mediante confirmação; a chave é enviada ao backend para chamar
+o provedor e não é persistida pelo aplicativo. Recomenda-se criar uma chave exclusiva
+com limite de gasto e/ou expiração. Tabelas oferecem CSV e PNG; barras, linhas e
+métricas oferecem PNG.
 
 ## O que está incluído
 
@@ -36,9 +50,9 @@ apresenta resultados auditáveis em Streamlit.
 - O anexo `anexo_desafio_1.db`, mantido fora do repositório
 - Chrome ou Chromium compatível para exportar PNG com Kaleido 1.x
 
-O projeto espera o anexo em `../anexo_desafio_1.db` por padrão. É possível usar outro
-SQLite compatível via `DB_PATH` ou pelo parâmetro de URL `?DB=...`. O arquivo é sempre
-aberto em modo somente leitura e nunca é copiado pelo aplicativo.
+O projeto espera o anexo em `../anexo_desafio_1.db` por padrão. Para usar outro
+SQLite compatível localmente, configure `DB_PATH` antes de iniciar o processo. O
+arquivo é sempre aberto em modo somente leitura e nunca é copiado pelo aplicativo.
 
 ## Configuração
 
@@ -51,9 +65,9 @@ Preencha apenas a chave no `.env`:
 
 ```dotenv
 OPENROUTER_API_KEY=sua-chave-local
-OPENROUTER_MODEL=openrouter/free
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 DB_PATH=../anexo_desafio_1.db
+OPENROUTER_FREE_DAILY_REQUEST_LIMIT=45
 MAX_SQL_FIX_ATTEMPTS=3
 MAX_QUERY_BUDGET=6
 ```
@@ -61,11 +75,12 @@ MAX_QUERY_BUDGET=6
 O `.env`, bancos, logs, caches, CSVs e PNGs são ignorados pelo Git. Em redes com uma
 autoridade certificadora corporativa, execute `uv sync --system-certs`.
 
-O roteador gratuito não cobra por tokens, mas ainda exige uma chave do OpenRouter e está
-sujeito aos limites diários do plano gratuito. Como ele pode selecionar modelos diferentes
-ao longo do tempo, a resposta pode variar; para comportamento mais estável, é possível
-definir no `.env` um modelo gratuito específico depois de validá-lo. Use somente dados sem
-informações sensíveis, pois as políticas de retenção dos provedores gratuitos podem variar.
+O roteador gratuito ainda exige uma chave OpenRouter e está sujeito aos limites do
+provedor. O fluxo público usa somente `openrouter/free`, inclusive com BYOK; o
+roteador pode selecionar modelos diferentes ao longo do tempo. A cota local conta
+cada chamada real ao modelo, não cada pergunta, e o limite diário compartilhado é
+configurável. Use somente dados não sensíveis, pois as políticas dos provedores
+gratuitos podem variar.
 
 ## Validar o anexo
 
@@ -95,21 +110,16 @@ configurada, inicie a interface:
 uv run streamlit run app.py
 ```
 
-Para selecionar outra fonte apenas nessa sessão, abra uma URL como:
-
-```text
-http://localhost:8501/?DB=C:/dados/clientes_completo.db
-```
-
-O parâmetro `DB` tem prioridade sobre `DB_PATH`. Caminho ausente ou arquivo inválido gera
-uma orientação na interface sem criar ou sobrescrever nada.
+Para trocar a fonte local, altere `DB_PATH` no `.env` e reinicie a aplicação. A
+interface pública não aceita caminhos de banco por URL. Caminho ausente ou arquivo
+inválido gera uma orientação sem criar ou sobrescrever nada.
 
 ## Interface
 
-A barra lateral informa a fonte e o modelo, oferece as cinco perguntas de demonstração e
-os temas `System`, `Light` e `Dark`. `System` é o padrão e acompanha o navegador. Os
-overrides ajustam as superfícies próprias e os gráficos; os controles nativos preservam a
-configuração do Streamlit.
+A barra lateral informa a fonte e o modelo e oferece as cinco perguntas de
+demonstração. A interface segue automaticamente o tema claro/escuro do sistema; não
+há seletor de tema. O robô é usado como favicon e marca no topo, e o indicador de
+carregamento respeita a preferência por movimento reduzido.
 
 Cada resposta contém:
 
@@ -136,6 +146,19 @@ uv run pytest -m png
 O smoke check confirma a assinatura de um PNG real sem gravar arquivo no projeto. Quando
 o navegador estiver ausente, o teste marcado `png` é ignorado com motivo explícito;
 falhas de inicialização com um navegador encontrado continuam sendo reportadas.
+
+## Docker e publicação
+
+`docker build -t data-assistant:test .` cria uma imagem não-root com Chromium e
+executa o smoke PNG durante o build. O `compose.yaml` monta o anexo externo em modo
+somente leitura e um diretório de runtime separado; não publica a porta 8501. O
+perfil `public` liga o Cloudflare Tunnel à rede interna do Compose. Variáveis,
+token do Tunnel e banco ficam fora da imagem e do Git.
+
+O [runbook de publicação](DEPLOYMENT.md) descreve inventário DNS, provisionamento
+Ubuntu/Debian, chave SSH de deploy dedicada, GitHub Actions/GHCR, verificações de
+saúde e rollback. A publicação remota só é habilitada com `PRODUCTION_READY=true`
+após o preflight do servidor. Não execute o perfil público sem completar o runbook.
 
 ## Arquitetura
 
@@ -167,7 +190,7 @@ flowchart LR
 | `visualization.py` | Compatibilidade, fallback, Plotly e exportação |
 | `assistant.py` | API pública e tratamento operacional de falhas |
 
-As decisões estão registradas nos ADRs 001–008 do material de arquitetura do projeto.
+As decisões estão registradas nos ADRs 001–010 do material local de arquitetura.
 
 ## Perguntas e resultados do anexo
 
@@ -202,8 +225,8 @@ uv run pytest -m llm
 
 ## Limites conhecidos e próximos passos
 
-- O fluxo é single-user e roda no mesmo processo do Streamlit; uma API HTTP fica como
-  evolução para múltiplos clientes.
+- O Streamlit aceita sessões independentes, mas esta implantação tem um processo de
+  aplicação; escalar horizontalmente exige coordenação dos limites de abuso.
 - A descoberta envia o schema completo ao modelo; seleção semântica de tabelas ou RAG
   passa a ser útil em bancos grandes.
 - O cardápio visual cobre quatro tipos intencionalmente simples; filtros e gráficos
