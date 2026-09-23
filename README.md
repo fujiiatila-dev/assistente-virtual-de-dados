@@ -1,176 +1,235 @@
-# Assistente Virtual de Dados — Desafio 1
+# Assistente Virtual de Dados — Desafio Técnico 1
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![uv](https://img.shields.io/badge/deps-uv-5C4EE5)
 
-Assistente em linguagem natural para perguntas de negócio sobre um SQLite. O produto
-descobre o schema em runtime, gera e corrige SQL com LangGraph, executa somente leitura e
-apresenta resultados auditáveis em Streamlit.
+Assistente em linguagem natural para consultar uma base SQLite. Descobre o schema em
+runtime, gera e valida SQL com LangGraph e `sqlglot`, executa consultas somente para
+leitura e apresenta resultados com evidências em uma interface Streamlit em pt-BR.
 
 [English version](README.en.md)
 
-## Avaliação online
+## Demonstração pública
 
-O endereço público da demonstração é **https://avaliacao.nalk.com.br**. O acesso será
-livre, sem login ou e-mail, assim que o provisionamento do servidor e do DNS terminar.
-No momento, a publicação ainda depende dessa etapa operacional; use as instruções
-locais abaixo enquanto o endereço não estiver ativo.
+A demonstração está publicada em **<https://avaliacao.nalk.com.br>**. A base usada é
+fictícia. Não envie dados pessoais, segredos ou informações confidenciais: a pergunta e
+o schema necessário à consulta são enviados ao provedor de modelos.
 
-A base disponibilizada na demonstração é fictícia. O assistente usa
-`openrouter/free` com uma chave compartilhada e uma cota diária de segurança. Se a
-cota acabar, a interface pode solicitar uma chave OpenRouter própria (BYOK) somente
-para a sessão atual, mediante confirmação; a chave é enviada ao backend para chamar
-o provedor e não é persistida pelo aplicativo. Recomenda-se criar uma chave exclusiva
-com limite de gasto e/ou expiração. Tabelas oferecem CSV e PNG; barras, linhas e
-métricas oferecem PNG.
+O fluxo público usa o roteador gratuito `openrouter/free`, que pode selecionar modelos
+diferentes ao longo do tempo e está sujeito à disponibilidade e aos limites do provedor.
+Se não houver chave compartilhada válida ou a cota terminar, a interface pode oferecer
+o uso de uma chave OpenRouter própria (BYOK), sempre após confirmação. A chave é usada
+somente na sessão atual, enviada ao backend para chamar o provedor e não é gravada em
+arquivo ou log. A interface permite limpar a chave da sessão. Prefira uma chave
+exclusiva com limite de gastos e/ou validade curta.
 
-## O que está incluído
+## Funcionalidades e requisitos
 
-- Grafo explícito: interpretar → descobrir schema → gerar → validar → executar →
-  corrigir/refinar → formatar.
-- OpenRouter por API compatível com OpenAI; o padrão é o roteador gratuito
-  `openrouter/free`, que seleciona um modelo gratuito disponível com suporte às
-  saídas estruturadas usadas pelo agente.
-- Schema dinâmico com tabelas, colunas extras, chaves estrangeiras e amostras de valores
-  categóricos.
-- SQLite em `mode=ro`, `query_only=ON`, limite máximo de 200 linhas, timeout, até seis
-  queries e até três correções depois da tentativa inicial.
-- Validação com `sqlglot`: somente `SELECT`/`WITH`; escrita, múltiplos statements,
-  `PRAGMA`, `ATTACH`, `load_extension` e joins cartesianos são rejeitados.
-- Chat Streamlit em pt-BR com etapas operacionais, SQL, amostras dos resultados,
-  estados de erro e avisos sem chain-of-thought privado.
-- Tabela, barras, linha e métrica; troca local sem nova consulta; CSV e PNG para tabelas,
-  PNG para os demais visuais.
+- **Descoberta dinâmica:** tabelas, colunas, tipos, chaves estrangeiras e amostras de
+  valores categóricos são lidos do banco em runtime; as consultas não dependem de um
+  schema SQL hardcoded.
+- **Consulta segura:** SQLite aberto com `mode=ro` e `PRAGMA query_only=ON`; somente
+  `SELECT`/`WITH`; validação da AST com `sqlglot`; comandos de escrita, múltiplos
+  statements, `PRAGMA`, `ATTACH`, extensões e joins cartesianos são rejeitados.
+- **Limites:** 200 linhas por padrão, timeout, no máximo 6 consultas por pergunta e até
+  3 tentativas de correção SQL após a consulta inicial.
+- **Fonte de verdade:** métricas de compras são calculadas a partir da tabela
+  transacional `compras`. Campos agregados/desnormalizados em `clientes` são apenas
+  informativos quando não reconciliam com os fatos.
+- **Grafo explícito:** interpretar a pergunta → descobrir schema → gerar SQL → validar
+  → executar → corrigir/refinar dentro do orçamento → formatar a resposta.
+- **Resposta auditável:** contrato com `status`, `warnings` e `available_types`; mostra
+  etapas operacionais, SQL e amostras relevantes, sem expor chain-of-thought privado.
+- **Visualizações:** `table`, `bar`, `line` e `metric`; fallback determinístico para
+  tabela quando os dados não atendem ao visual solicitado; troca de visual sem nova
+  consulta. Tabelas podem ser exportadas em CSV e PNG; os demais visuais, em PNG.
+- **Interface:** componentes nativos do Streamlit, textos em pt-BR e estilo inspirado em
+  Material 3. O padrão segue `System`; em [⋮ → Settings → Theme](https://docs.streamlit.io/develop/concepts/architecture/app-chrome#settings),
+  o usuário pode escolher `Use system setting`, `Light` ou `Dark`. A paleta dos gráficos
+  acompanha o tema efetivo.
 
-## Requisitos
+O enunciado especifica `google/gemini-2.5-flash` configurável por
+`OPENROUTER_MODEL`. A versão pública atual, porém, fixa `openrouter/free` para os
+fluxos de chave compartilhada e BYOK; isso é um desvio de implementação e não garante
+um modelo subjacente específico. A configuração usa Python 3.11+, `uv`, LangGraph,
+LangChain/OpenAI-compatible client, OpenRouter, SQLite, `sqlglot`, Pydantic,
+`python-dotenv`, Streamlit, Plotly, Kaleido, Pytest, Ruff e Mypy.
+
+## Requisitos locais
 
 - Python 3.11 ou superior
 - [uv](https://docs.astral.sh/uv/)
-- Chave do OpenRouter para perguntas reais
-- O anexo `anexo_desafio_1.db`, mantido fora do repositório
-- Chrome ou Chromium compatível para exportar PNG com Kaleido 1.x
+- O anexo fictício `anexo_desafio_1.db`, mantido fora do repositório
+- Uma chave OpenRouter para chamadas reais ao modelo
+- Chrome ou Chromium compatível para exportação PNG com Kaleido 1.x
 
-O projeto espera o anexo em `../anexo_desafio_1.db` por padrão. Para usar outro
-SQLite compatível localmente, configure `DB_PATH` antes de iniciar o processo. O
-arquivo é sempre aberto em modo somente leitura e nunca é copiado pelo aplicativo.
+Por padrão, o processo local lê `../anexo_desafio_1.db`. O aplicativo nunca copia,
+altera ou versiona o anexo. Para usar outro SQLite local, configure `DB_PATH` no `.env`.
 
-## Configuração
+## Configuração e execução local
+
+No PowerShell, a partir da raiz do repositório:
 
 ```powershell
 uv sync
 Copy-Item .env.example .env
 ```
 
-Preencha apenas a chave no `.env`:
+Configure a chave local no `.env` e confirme o caminho do banco:
 
 ```dotenv
 OPENROUTER_API_KEY=sua-chave-local
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=openrouter/free
 DB_PATH=../anexo_desafio_1.db
-OPENROUTER_FREE_DAILY_REQUEST_LIMIT=45
-MAX_SQL_FIX_ATTEMPTS=3
-MAX_QUERY_BUDGET=6
 ```
 
-O `.env`, bancos, logs, caches, CSVs e PNGs são ignorados pelo Git. Em redes com uma
-autoridade certificadora corporativa, execute `uv sync --system-certs`.
+Mantenha `.env`, chaves, bancos SQLite e seus arquivos WAL/journal, ledger de runtime,
+logs, CSVs, PNGs e caches fora do Git. Somente `.env.example` deve representar a
+configuração de ambiente versionada.
 
-O roteador gratuito ainda exige uma chave OpenRouter e está sujeito aos limites do
-provedor. O fluxo público usa somente `openrouter/free`, inclusive com BYOK; o
-roteador pode selecionar modelos diferentes ao longo do tempo. A cota local conta
-cada chamada real ao modelo, não cada pergunta, e o limite diário compartilhado é
-configurável. Use somente dados não sensíveis, pois as políticas dos provedores
-gratuitos podem variar.
+Os limites de runtime podem ser ajustados no `.env`. Os valores do exemplo são
+45 chamadas compartilhadas por dia, 30 segundos por chamada ao provedor, 2000 caracteres
+por pergunta, 2 perguntas concorrentes, 5 perguntas por sessão por minuto, até 3
+correções SQL e até 6 consultas por pergunta. O ledger agregado de cota fica em
+`QUOTA_DB_PATH` (padrão `runtime/quota.sqlite3`), separado do banco de referência.
 
-## Validar o anexo
-
-O validador lê o arquivo com `mode=ro`, confirma integridade, schema mínimo, chaves
-estrangeiras, contagens e períodos. Colunas extras são aceitas. Divergências entre os
-campos denormalizados de `clientes` e os fatos de `compras` aparecem como `WARNING`.
+Valide o anexo antes de iniciar:
 
 ```powershell
-python scripts/validate_dataset.py --db ..\anexo_desafio_1.db
+uv run python scripts/validate_dataset.py --db ..\anexo_desafio_1.db
 ```
 
-O relatório esperado para o anexo fornecido contém 100 clientes, 946 compras, 273
-atendimentos e 248 registros de campanha.
+O validador usa acesso somente leitura e verifica integridade, schema mínimo, chaves
+estrangeiras, contagens e períodos. Colunas extras são aceitas; divergências entre
+campos desnormalizados de clientes e os fatos transacionais aparecem como `WARNING`.
+No anexo fornecido, o relatório esperado inclui 100 clientes, 946 compras,
+273 atendimentos e 248 registros de campanha.
 
-## Executar
-
-Verifique primeiro a conexão com o provedor:
+Opcionalmente, verifique a conexão do provedor. Esse comando faz uma chamada real e
+consome cota:
 
 ```powershell
 uv run python scripts/smoke_llm.py
 ```
 
-Sem chave, o script mostra uma mensagem operacional e termina com código 2. Com a chave
-configurada, inicie a interface:
+Inicie a interface:
 
 ```powershell
 uv run streamlit run app.py
 ```
 
-Para trocar a fonte local, altere `DB_PATH` no `.env` e reinicie a aplicação. A
-interface pública não aceita caminhos de banco por URL. Caminho ausente ou arquivo
-inválido gera uma orientação sem criar ou sobrescrever nada.
+Abra o endereço local informado pelo Streamlit (por padrão, <http://localhost:8501>).
+Se `DB_PATH` estiver ausente ou apontar para um arquivo inválido, a aplicação exibe uma
+orientação operacional; não cria nem sobrescreve o banco. Para usar outra base local,
+altere `DB_PATH` no `.env` e reinicie. A interface pública não aceita caminhos de banco
+pela URL.
 
-## Interface
+## Perguntas de aceite e resultados de referência
 
-A barra lateral informa a fonte e o modelo e oferece as cinco perguntas de
-demonstração. A interface segue automaticamente o tema claro/escuro do sistema; não
-há seletor de tema. O robô é usado como favicon e marca no topo, e o indicador de
-carregamento respeita a preferência por movimento reduzido.
+Os resultados abaixo correspondem ao anexo fornecido. Outras bases compatíveis podem
+produzir resultados diferentes.
 
-Cada resposta contém:
+| Pergunta | Resultado esperado | Visual |
+|---|---|---|
+| Quais são os 5 estados com mais clientes que compraram pelo App em maio? | São Paulo 6; Minas Gerais 3; Santa Catarina 3; Alagoas 2; Espírito Santo 2 | Barras |
+| Quantos clientes interagiram com campanhas de WhatsApp em 2024? | 33 clientes distintos; 17 interações (`interagiu=1`); 35 envios | Métrica |
+| Quais categorias tiveram o maior número de compras em média por cliente? | Roupas 2,21; Viagens 2,16; Livros 1,98; Serviços 1,96; Eletrônicos 1,92; Alimentos 1,88 | Barras |
+| Quantas reclamações não resolvidas existem por canal? | Telefone 19; Chat 18; E-mail 14 | Barras |
+| Qual foi a tendência mensal de reclamações por canal no último ano? | Série mensal de 2024-07 a 2025-07 no anexo fornecido | Linhas |
+
+## Interface e exportação
+
+Cada resposta pode apresentar:
 
 - `status`: `success`, `empty`, `partial` ou `error`;
-- texto executivo e `warnings`;
-- dados e visualização validada com `available_types`;
-- um painel expansível com etapas operacionais, queries, erros corrigidos e amostras;
-- downloads compatíveis com o tipo selecionado.
+- texto executivo, dados e `warnings`;
+- visualização validada e seus `available_types`;
+- painel expansível com etapas operacionais, queries executadas, erros corrigidos e
+  amostras úteis para conferência.
 
-Se o Kaleido não conseguir gerar a imagem, o resultado continua disponível e somente o
-download PNG exibe uma mensagem operacional. O Kaleido 1.x não instala um navegador junto
-com o pacote. Instale Chrome/Chromium no ambiente uma vez, ou execute
-`uv run plotly_get_chrome` (alternativamente, `uv run kaleido_get_chrome`). Se o navegador
-não for detectado automaticamente, configure `BROWSER_PATH` no `.env` com o caminho
-completo do executável. O aplicativo não baixa navegadores durante uma pergunta.
+Falhas produzem mensagens operacionais, sem exibir stack trace cru.
 
-Confira a exportação estática antes da avaliação:
+A troca de visualização usa os dados já carregados e não executa outra consulta. Se os
+dados não forem compatíveis com o tipo solicitado, a tabela é o fallback previsível.
+Se o Kaleido ou o navegador não conseguir gerar PNG, os dados continuam disponíveis e
+a interface informa o problema sem remover o resultado.
+
+Kaleido 1.x não instala navegador. Instale Chrome/Chromium uma vez ou execute:
+
+```powershell
+uv run plotly_get_chrome
+```
+
+Se o navegador não for detectado, configure `BROWSER_PATH` no `.env` com o caminho
+completo do executável. O aplicativo não baixa navegadores enquanto responde.
+
+Verifique a exportação antes da avaliação:
 
 ```powershell
 uv run python scripts/smoke_png.py
 uv run pytest -m png
 ```
 
-O smoke check confirma a assinatura de um PNG real sem gravar arquivo no projeto. Quando
-o navegador estiver ausente, o teste marcado `png` é ignorado com motivo explícito;
-falhas de inicialização com um navegador encontrado continuam sendo reportadas.
+O smoke test valida bytes PNG em memória, sem criar uma imagem no projeto. Testes
+marcados `png` são ignorados com motivo explícito quando não há navegador instalado.
+
+## Testes e qualidade
+
+```powershell
+uv run pytest
+uv run ruff check .
+uv run mypy src/
+```
+
+Os testes unitários cobrem descoberta do schema, guardrails SQL, execução SQLite,
+tratamento de erros, contrato de resposta, visuais, exportação e comportamento da
+interface. Os testes das cinco perguntas reais usam o marcador `llm`, precisam do anexo
+e de `OPENROUTER_API_KEY`, e fazem chamadas ao provedor:
+
+```powershell
+uv run pytest -m llm
+```
+
+Execute esse último comando conscientemente, pois pode consumir várias chamadas da cota.
+Em redes com autoridade certificadora corporativa, configure a cadeia confiável e use
+`uv sync --system-certs`; não desative a validação TLS.
 
 ## Docker e publicação
 
-`docker build -t data-assistant:test .` cria uma imagem não-root com Chromium e
-executa o smoke PNG durante o build. O `compose.yaml` monta o anexo externo em modo
-somente leitura e um diretório de runtime separado; publica o app apenas em
-`127.0.0.1:8501`. No perfil `public`, o `cloudflared` usa `network_mode: host` e
-encaminha para `http://127.0.0.1:8501`. Variáveis, token do Tunnel e banco ficam fora
-da imagem e do Git.
+A imagem executa o app como usuário não-root (UID/GID `10001`), inclui Chromium e roda
+um smoke test de PNG durante o build. O Compose monta o banco externo somente para
+leitura, mantém o ledger em um volume de runtime separado e publica o app apenas em
+`127.0.0.1:8501`. No perfil `public`, `cloudflared` usa `network_mode: host` e encaminha
+para `http://127.0.0.1:8501`; não exponha a porta do app diretamente à Internet.
 
-Para avaliar no navegador **desta máquina**, use o override local explícito:
+Para um preview Docker local no PowerShell:
 
 ```powershell
 docker compose -f compose.yaml -f compose.local.yaml up -d --build app
 ```
 
-Abra http://127.0.0.1:8501. O override deixa explícita a intenção de preview local;
-não o use no servidor público. Para parar: `docker compose -f compose.yaml -f
-compose.local.yaml stop app`. A porta continua inacessível pela interface pública do
-host; o tráfego externo deve passar exclusivamente pelo Tunnel.
+Abra <http://127.0.0.1:8501>. O override é somente para preview local; não o use no
+servidor público. Para parar:
 
-O [runbook de publicação](DEPLOYMENT.md) descreve inventário DNS, provisionamento
-Ubuntu/Debian, chave SSH de deploy dedicada, GitHub Actions/GHCR, verificações de
-saúde e rollback. A publicação remota só é habilitada com `PRODUCTION_READY=true`
-após o preflight do servidor. Não execute o perfil público sem completar o runbook.
+```powershell
+docker compose -f compose.yaml -f compose.local.yaml stop app
+```
+
+Na implantação Linux, `.env`, banco, `runtime/` e `runtime/tunnel.env` ficam fora da
+imagem e do Git. O processo do app precisa conseguir gravar no diretório de runtime
+montado em `/app/runtime` para criar o ledger de quota; confira a permissão como o
+usuário do container (UID/GID `10001`). Preserve `runtime/tunnel.env` com modo `0600`;
+ele contém somente o token do Tunnel e é lido pelo Compose no host.
+
+Exemplo de verificação somente leitura no servidor:
+
+```bash
+sudo docker compose exec -T app sh -lc 'id; test -w /app/runtime && echo runtime_writable=YES || echo runtime_writable=NO; test -r /data/source.sqlite3 && echo database_readable=YES || echo database_readable=NO'
+```
+
+O [runbook de publicação](DEPLOYMENT.md) descreve o provisionamento, DNS/Cloudflare,
+GitHub Actions/GHCR, health checks, proteção dos segredos e rollback.
 
 ## Arquitetura
 
@@ -187,63 +246,28 @@ flowchart LR
     E --> A{Dados suficientes?}
     A -->|não, orçamento disponível| R[Refinar]
     R --> V
-    A -->|sim ou limite atingido| F[Formatar contrato]
+    A -->|sim ou orçamento atingido| F[Formatar contrato]
     F --> UI
 ```
 
 | Módulo | Responsabilidade |
 |---|---|
-| `schema.py` | Introspecção e DSL do schema, com cache limitado à sessão |
-| `validator.py` | Guardrails AST independentes do LLM |
-| `executor.py` | Conexão SQLite somente leitura, limite e timeout |
-| `llm.py` / `prompts.py` | Única fronteira com o OpenRouter |
-| `graph.py` | Estado, nós e arestas condicionais do LangGraph |
+| `schema.py` | Introspecção do schema e amostras de valores de baixa cardinalidade |
+| `validator.py` | Guardrails SQL independentes do LLM |
+| `executor.py` | SQLite somente leitura, timeout e limite de linhas |
+| `llm.py` / `prompts.py` | Fronteira com o OpenRouter |
+| `graph.py` | Estado, nós e transições condicionais do LangGraph |
 | `contract.py` | Contrato Pydantic entre motor e interface |
 | `visualization.py` | Compatibilidade, fallback, Plotly e exportação |
-| `assistant.py` | API pública e tratamento operacional de falhas |
+| `assistant.py` | API do assistente, cotas e falhas operacionais |
 
-As decisões estão registradas nos ADRs 001–010 do material local de arquitetura.
+## Limites conhecidos
 
-## Perguntas e resultados do anexo
-
-| Pergunta | Resultado esperado no anexo | Visual |
-|---|---|---|
-| 5 estados com mais clientes que compraram via App em maio | SP 6; MG 3; SC 3; AL 2; ES 2 | Barras |
-| Clientes associados a campanhas WhatsApp em 2024 | 33 clientes distintos; 17 interações (`interagiu=1`); 35 envios | Métrica |
-| Média de compras por cliente por categoria | Roupas 2,21; Viagens 2,16; Livros 1,98; Serviços 1,96; Eletrônicos 1,92; Alimentos 1,88 | Barras |
-| Reclamações não resolvidas por canal | Telefone 19; Chat 18; E-mail 14 | Barras |
-| Tendência de reclamações por canal | Série mensal de 2024-07 a 2025-07 | Linha |
-
-As métricas de compras usam a tabela transacional `compras`. Os campos
-`clientes.valor_total_gasto` e `clientes.data_ultima_compra` do anexo não reconciliam com
-os fatos e permanecem apenas informativos.
-
-## Testes e qualidade
-
-```powershell
-uv run pytest
-uv run ruff check .
-uv run mypy src/
-```
-
-Os testes unitários exercitam schema, guardrails, execução e renderização sem simular uma
-query gerada. As cinco perguntas de aceite passam exclusivamente pelo agente real: o SQL é
-produzido pelo OpenRouter a partir do schema descoberto em runtime. Esses testes usam o
-marcador `llm` e são ignorados quando a chave não existe:
-
-```powershell
-uv run pytest -m llm
-```
-
-## Limites conhecidos e próximos passos
-
-- O Streamlit aceita sessões independentes, mas esta implantação tem um processo de
-  aplicação; escalar horizontalmente exige coordenação dos limites de abuso.
-- A descoberta envia o schema completo ao modelo; seleção semântica de tabelas ou RAG
-  passa a ser útil em bancos grandes.
-- O cardápio visual cobre quatro tipos intencionalmente simples; filtros e gráficos
-  compostos ficam para uma evolução.
-- Autenticação, memória entre sessões, persistência de conversas e exportação PDF estão
-  fora deste MVP.
-- O Desafio Técnico 2 possui somente arquitetura de referência e não é entrada deste
-  aplicativo.
+- O serviço atual usa um processo Streamlit; escalar horizontalmente requer coordenação
+  dos limites e do ledger.
+- O schema relevante é enviado ao modelo; não use dados sensíveis.
+- As visualizações disponíveis são tabela, barras, linhas e métrica; filtros e gráficos
+  compostos não fazem parte desta interface.
+- Conversas são mantidas na sessão atual, sem memória persistente entre sessões.
+- A seleção `openrouter/free` depende de modelos e limites disponibilizados pelo
+  provedor e pode variar com o tempo.

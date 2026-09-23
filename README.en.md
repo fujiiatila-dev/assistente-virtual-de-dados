@@ -9,14 +9,13 @@ presents auditable results in Streamlit.
 
 [Versão em português](README.md)
 
-## Online evaluation
+## Public demo
 
-The public demonstration URL is **https://avaliacao.nalk.com.br**. It will be open
-without login or email once server and DNS provisioning is complete. Publication is
-still pending that operational step; use the local instructions below until the URL
-is live.
+The demo is published at **<https://avaliacao.nalk.com.br>**. Its dataset is fictional.
+Do not submit personal data, secrets, or confidential information: the question and
+schema needed for a query are sent to the model provider.
 
-The demonstration dataset is fictional. The assistant uses `openrouter/free` with a
+The assistant uses `openrouter/free` with a
 shared key and a guarded daily quota. If that quota is exhausted, the UI can request
 the visitor's own OpenRouter key (BYOK) for the current session only, after explicit
 confirmation. That key is sent to the backend to call the provider and is not
@@ -28,9 +27,10 @@ views as PNG.
 
 - Explicit graph: interpret → discover schema → generate → validate → execute →
   correct/refine → format.
-- OpenRouter through an OpenAI-compatible API; the default is the free router
-  `openrouter/free`, which selects an available free model supporting the structured
-  outputs used by the agent.
+- OpenRouter through an OpenAI-compatible API. The specification names
+  `google/gemini-2.5-flash` via `OPENROUTER_MODEL`; the currently published flow instead
+  pins `openrouter/free` for shared-key and BYOK requests. This is an implementation
+  deviation, and the router may select different underlying models over time.
 - Dynamic schema metadata, extra columns, foreign keys, and categorical value samples.
 - SQLite `mode=ro`, `query_only=ON`, a 200-row cap, query timeout, up to six queries,
   and up to three correction attempts after the initial query.
@@ -71,8 +71,10 @@ MAX_SQL_FIX_ATTEMPTS=3
 MAX_QUERY_BUDGET=6
 ```
 
-`.env`, databases, logs, caches, CSVs, and PNGs are ignored by Git. On networks with a
-corporate certificate authority, run `uv sync --system-certs`.
+Keep `.env`, keys, SQLite databases and their WAL/journal files, the runtime ledger,
+logs, CSVs, PNGs, and caches out of Git. Only `.env.example` should be tracked as the
+environment template. On networks with a corporate certificate authority, run
+`uv sync --system-certs`.
 
 The free router still requires an OpenRouter key and is subject to provider limits.
 The public flow uses only `openrouter/free`, including BYOK; the router may choose
@@ -114,10 +116,11 @@ an actionable message without creating or overwriting a file.
 
 ## Interface
 
-The sidebar shows the source and model and exposes five demo questions. The UI
-automatically follows the system light/dark theme; there is no theme selector. The
-robot is both favicon and top brand mark, and the loading indicator respects reduced
-motion preferences.
+The sidebar shows the source and model and exposes five demo questions. By default, the
+UI follows the system theme. Use [⋮ → Settings → Theme](https://docs.streamlit.io/develop/concepts/architecture/app-chrome#settings)
+to choose `Use system setting`, `Light`, or `Dark` in Streamlit's native controls. The
+robot is both favicon and top brand mark, and the loading indicator respects reduced-motion
+preferences.
 
 Each answer includes:
 
@@ -164,10 +167,12 @@ override on the public server. Stop it with `docker compose -f compose.yaml -f
 compose.local.yaml stop app`. The public server must route external traffic only
 through the Tunnel.
 
-The [deployment runbook](DEPLOYMENT.md) covers DNS inventory, Ubuntu/Debian
-provisioning, a dedicated SSH deploy key, GitHub Actions/GHCR, health checks, and
-rollback. Remote deployment is enabled only with `PRODUCTION_READY=true` after
-server preflight. Do not start the public profile before completing the runbook.
+For Linux deployment, `.env`, the database, `runtime/`, and `runtime/tunnel.env` remain
+outside the image and Git. The app process runs as UID/GID `10001` and must be able to
+write to the runtime directory mounted at `/app/runtime` to create its quota ledger.
+Keep `runtime/tunnel.env` at mode `0600`; it contains only the Tunnel token and is read
+by Compose on the host. The [deployment runbook](DEPLOYMENT.md) covers provisioning,
+DNS/Cloudflare, GitHub Actions/GHCR, health checks, secret handling, and rollback.
 
 ## Architecture
 
@@ -199,7 +204,9 @@ flowchart LR
 | `visualization.py` | Compatibility, fallback, Plotly, and exports |
 | `assistant.py` | Public API and operational error handling |
 
-Architecture decisions are captured in ADRs 001–010 in local architecture materials.
+Purchase metrics use the transactional `compras` table as their source of truth; the
+attachment's denormalized customer totals and last-purchase dates are informational
+when they do not reconcile with those facts.
 
 ## Attachment questions and results
 
@@ -232,7 +239,7 @@ marker and skip when the key is missing:
 uv run pytest -m llm
 ```
 
-## Known limits and next steps
+## Known limits
 
 - Streamlit supports independent sessions, but this deployment has one app process;
   horizontal scaling would require coordinated abuse limits.
@@ -242,5 +249,3 @@ uv run pytest -m llm
   future work.
 - Authentication, cross-session memory, conversation persistence, and PDF export are
   outside this MVP.
-- Technical Challenge 2 is architecture reference material only and is not an input to
-  this application.
