@@ -151,9 +151,10 @@ falhas de inicialização com um navegador encontrado continuam sendo reportadas
 
 `docker build -t data-assistant:test .` cria uma imagem não-root com Chromium e
 executa o smoke PNG durante o build. O `compose.yaml` monta o anexo externo em modo
-somente leitura e um diretório de runtime separado; não publica a porta 8501. O
-perfil `public` liga o Cloudflare Tunnel à rede interna do Compose. Variáveis,
-token do Tunnel e banco ficam fora da imagem e do Git.
+somente leitura e um diretório de runtime separado; publica o app apenas em
+`127.0.0.1:8501`. No perfil `public`, o `cloudflared` usa `network_mode: host` e
+encaminha para `http://127.0.0.1:8501`. Variáveis, token do Tunnel e banco ficam fora
+da imagem e do Git.
 
 Para avaliar no navegador **desta máquina**, use o override local explícito:
 
@@ -161,10 +162,10 @@ Para avaliar no navegador **desta máquina**, use o override local explícito:
 docker compose -f compose.yaml -f compose.local.yaml up -d --build app
 ```
 
-Abra http://127.0.0.1:8501. O override publica a porta somente em loopback; não o
-use no servidor público. Para parar: `docker compose -f compose.yaml -f
-compose.local.yaml stop app`. Sem o override, `8501/tcp` em `docker compose ps`
-indica apenas uma porta interna, não um endereço acessível no host.
+Abra http://127.0.0.1:8501. O override deixa explícita a intenção de preview local;
+não o use no servidor público. Para parar: `docker compose -f compose.yaml -f
+compose.local.yaml stop app`. A porta continua inacessível pela interface pública do
+host; o tráfego externo deve passar exclusivamente pelo Tunnel.
 
 O [runbook de publicação](DEPLOYMENT.md) descreve inventário DNS, provisionamento
 Ubuntu/Debian, chave SSH de deploy dedicada, GitHub Actions/GHCR, verificações de

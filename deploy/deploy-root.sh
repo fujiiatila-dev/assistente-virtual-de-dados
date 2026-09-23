@@ -13,14 +13,15 @@ if [[ $(id -u) -ne 0 ]]; then
     exit 77
 fi
 
-deploy_dir=/srv/data-assistant
+deploy_dir=/home/atila/assistente-virtual-dados
 state_dir=/var/lib/data-assistant
 state_file="$state_dir/deployed-image"
 image_prefix=ghcr.io/fujiiatila-dev/assistente-virtual-de-dados
 
 if [[ ! -f "$deploy_dir/compose.yaml" || ! -f "$deploy_dir/.env" ||
+      ! -s "$deploy_dir/data/anexo_desafio_1.db" ||
       ! -s "$deploy_dir/runtime/tunnel.env" ]]; then
-    echo 'Compose ou configuração de runtime ausente; provisionamento incompleto.' >&2
+    echo 'Compose, banco ou configuração de runtime ausente; provisionamento incompleto.' >&2
     exit 78
 fi
 mkdir -p "$state_dir"

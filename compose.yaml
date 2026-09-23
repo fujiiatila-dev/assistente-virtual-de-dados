@@ -18,8 +18,8 @@ services:
       - type: bind
         source: ${RUNTIME_DIR:-./runtime}
         target: /app/runtime
-    expose:
-      - "8501"
+    ports:
+      - "127.0.0.1:8501:8501"
     networks:
       - assistant_net
     restart: unless-stopped
@@ -37,8 +37,7 @@ services:
     depends_on:
       app:
         condition: service_healthy
-    networks:
-      - assistant_net
+    network_mode: host
     restart: unless-stopped
 
 networks:

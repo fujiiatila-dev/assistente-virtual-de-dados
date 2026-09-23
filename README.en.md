@@ -148,10 +148,10 @@ installed browser remain test failures.
 
 `docker build -t data-assistant:test .` creates a non-root image with Chromium and
 runs the PNG smoke check during build. `compose.yaml` mounts the external attachment
-read-only and a separate runtime directory; it does not publish port 8501. The
-`public` profile connects Cloudflare Tunnel to the internal Compose network.
-Environment variables, the Tunnel token, and the database remain outside the image
-and Git.
+read-only and a separate runtime directory; the app binds only to `127.0.0.1:8501`.
+In the `public` profile, `cloudflared` uses `network_mode: host` and forwards to
+`http://127.0.0.1:8501`. Environment variables, the Tunnel token, and the database
+remain outside the image and Git.
 
 For a browser preview **on this machine**, use the explicit local override:
 
@@ -159,10 +159,10 @@ For a browser preview **on this machine**, use the explicit local override:
 docker compose -f compose.yaml -f compose.local.yaml up -d --build app
 ```
 
-Open http://127.0.0.1:8501. This binds the port to loopback only; do not use the
+Open http://127.0.0.1:8501. The override makes local preview explicit; do not use the
 override on the public server. Stop it with `docker compose -f compose.yaml -f
-compose.local.yaml stop app`. Without the override, `8501/tcp` in `docker compose
-ps` means an internal container port, not a host-accessible address.
+compose.local.yaml stop app`. The public server must route external traffic only
+through the Tunnel.
 
 The [deployment runbook](DEPLOYMENT.md) covers DNS inventory, Ubuntu/Debian
 provisioning, a dedicated SSH deploy key, GitHub Actions/GHCR, health checks, and

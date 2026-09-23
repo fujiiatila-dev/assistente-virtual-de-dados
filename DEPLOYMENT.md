@@ -1,21 +1,23 @@
 # Publicação de `avaliacao.nalk.com.br`
 
 Este runbook prepara uma demonstração pública sem login. O origin só recebe conexões
-internas do `cloudflared`; não publique a porta 8501. Não execute a seção de servidor
-antes de confirmar o sistema operacional, o plano da zona Cloudflare e o inventário DNS.
+internas do `cloudflared`; o app deve publicar a porta somente em `127.0.0.1:8501`.
+O ambiente operacional informado é Ubuntu 24.04.4 LTS; não avance o deploy até validar
+o acesso SSH de deploy e os gates remotos.
 
 ## Próximos passos
 
-O código já foi enviado para `https://github.com/fujiiatila-dev/assistente-virtual-de-dados`
-na branch `main`. O primeiro ciclo de Actions/GHCR ainda precisa ser conferido. A
-implantação pública não está ativa.
+O repositório oficial é `fujiiatila-dev/assistente-virtual-de-dados`, com branch `main`.
+A publicação só pode ser considerada ativa depois da validação HTTPS, WebSocket, container
+e imagem GHCR. Verifique o status de Actions e a disponibilidade do endpoint antes de cada
+cutover.
 
-1. **Confirmar a máquina:** informar versão e arquitetura do Ubuntu/Debian; em seguida,
-   testar acesso administrativo e registrar capacidade, disco e conectividade de saída.
-2. **Revisar DNS:** exportar a zona `nalk.com.br`, inventariar os registros e avaliar
-   plano Cloudflare e impacto da delegação. Não alterar nameservers até aprovar inventário
-   e reversão.
-3. **Validar GitHub:** conferir o primeiro workflow de CI em `main`, permissões de Actions
+1. **Confirmar a máquina:** verificar versão/arquitetura do Ubuntu/Debian, capacidade,
+   disco, permissões e conectividade de saída. Não imprimir nem copiar conteúdo de `.env`.
+2. **Revisar DNS:** confirmar que a zona `nalk.com.br` está ativa na Cloudflare, revisar
+   MX/TXT preservados e conferir o CNAME do Tunnel. Não criar registro `A`/`AAAA` para o
+   IP do origin nem alterar registros de e-mail.
+3. **Validar GitHub:** conferir o workflow de CI em `main`, permissões de Actions
    e publicação GHCR. Proteger `main`; preparar Environment `production` e secrets conforme
    a seção abaixo. `gh auth login` permite consultar runs com o CLI; não envie credenciais
    por chat.
@@ -27,7 +29,7 @@ implantação pública não está ativa.
    somente leitura, scripts root-owned, usuário SSH restrito e regra sudo mínima. Bloquear
    entrada em 8501 e testar saída para GHCR, OpenRouter e Cloudflare Tunnel.
 6. **Ativar publicação:** tornar o pacote GHCR legível pelo host; configurar Environment e
-   secrets; criar o Tunnel e rota para `http://app:8501`; aplicar WAF/rate limit sem Access;
+   secrets; criar/confirmar o Tunnel e rota para `http://127.0.0.1:8501`; aplicar WAF/rate limit sem Access;
    só então definir `PRODUCTION_READY=true` e executar deploy aprovado.
 7. **Aceitar ou reverter:** validar HTTPS/WebSocket, cinco perguntas, quota/BYOK, exports,
    tema, WAF, logs e ausência de porta pública; guardar evidências sem dados sensíveis. Se
@@ -37,17 +39,19 @@ Não avance para os passos 5–7 antes de concluir os pré-requisitos dos passos
 
 ## Estado e pré-requisitos
 
-- [ ] Versão e arquitetura Ubuntu/Debian do servidor confirmadas; acesso
-  administrativo já informado, mas ainda não testado.
+- [x] Ubuntu 24.04.4 LTS, Docker 29.6.1 e Compose 5.3.1 informados; validar
+  arquitetura, disco, diretórios e conectividade durante o preflight remoto.
 - [x] Repositório `fujiiatila-dev/assistente-virtual-de-dados` criado e `main` enviado.
-- [ ] Branch `main` protegida; Actions e GHCR habilitados e primeiro CI revisado.
-- [ ] Acesso à zona Cloudflare informado; inventário DNS e janela de alteração ainda
-  precisam ser confirmados.
-- [ ] Estratégia SSH dedicada confirmada; par de chaves, usuário restrito e host key
-  ainda precisam ser provisionados/verificados fora do Git.
-- [ ] Chave OpenRouter com limite próprio e token dedicado do Tunnel ainda precisam ser
-  criados diretamente nos destinos de runtime, sem serem enviados por chat.
-- [ ] Cópia aprovada do banco fictício disponível fora do checkout e verificada pelo
+- [ ] `main` ainda não tem regra de proteção configurada.
+- [x] Actions e GHCR habilitados; CI e build da imagem no último release de `main`
+  concluíram com sucesso. O deploy foi ignorado com `PRODUCTION_READY` ausente.
+- [x] A zona está delegada à Cloudflare; nameservers e MX/TXT foram conferidos. Antes do
+  cutover, confirmar zona `Active`, hostname e CNAME do Tunnel sem alterar e-mail.
+- [ ] Estratégia SSH dedicada informada; autenticação do agente ainda não foi validada.
+  O deploy não pode prosseguir até `DEPLOY_USER`, chave e host key serem confirmados.
+- [ ] `.env` do servidor já existe; verificar somente presença e modo, sem ler/imprimir
+  seu conteúdo. Confirmar `runtime/tunnel.env` e sua permissão `0600` diretamente no host.
+- [ ] Banco fictício disponível em `data/anexo_desafio_1.db` e verificado pelo
   `scripts/validate_dataset.py` sem alterar o arquivo.
 
 O `compose.yaml` usa dois arquivos de ambiente **não versionados**: `.env` para o app e
@@ -66,9 +70,10 @@ configuração sem renderizar valores, use `docker compose config --no-env-resol
    substituir os nameservers no registrador. A modalidade [CNAME parcial][partial]
    mantém o DNS autoritativo atual, mas exige plano Business ou Enterprise; não a assuma
    disponível. Não crie um `A` para o IP do origin.
-3. Crie um Tunnel gerenciado remotamente e a rota pública HTTPS
-   `avaliacao.nalk.com.br` → `http://app:8501`. Não associe Cloudflare Access ao
-   hostname de avaliação. O `cloudflared` lê `TUNNEL_TOKEN` do arquivo de runtime.
+3. Crie/valide um Tunnel gerenciado remotamente e a rota pública HTTPS
+   `avaliacao.nalk.com.br` → `http://127.0.0.1:8501`. O `cloudflared` usa
+   `network_mode: host` e lê `TUNNEL_TOKEN` do arquivo de runtime. Não associe
+   Cloudflare Access ao hostname de avaliação.
    Confirme conexão saudável e [roteamento público do Tunnel][tunnel].
 4. Habilite [rate limiting de borda][rate] para o hostname. Comece com a abertura do
    WebSocket `/_stcore/stream` em, no máximo, 20 handshakes/minuto por IP, mitigação de
@@ -83,24 +88,25 @@ configuração sem renderizar valores, use `docker compose config --no-env-resol
 
 ## Servidor (Ubuntu/Debian; adaptar após versão e arquitetura confirmadas)
 
-Use as instruções [oficiais do Docker para a distribuição][docker-install]. A conta
-de deploy não entra no grupo `docker` nem recebe sudo geral. O administrador cria
-`/srv/data-assistant` root-owned com `compose.yaml` versionado, `.env` 0600,
-`data/source.sqlite3` fora do Git, `runtime/` gravável pelo UID 10001 e
-`runtime/tunnel.env` 0600 somente para o Docker Compose. Configure no `.env` do servidor:
+Use as instruções [oficiais do Docker para a distribuição][docker-install]. Preserve
+`/home/atila/assistente-virtual-dados/`, `.env`, `data/` e `runtime/` já existentes. A
+conta de deploy não entra no grupo `docker` nem recebe sudo geral. O diretório contém
+`compose.yaml`, `.env` 0600, `data/anexo_desafio_1.db` fora do Git, `runtime/` gravável
+pelo UID 10001 e `runtime/tunnel.env` 0600 somente para o Docker Compose. Configure no
+`.env` do servidor:
 
 ```dotenv
 OPENROUTER_API_KEY=<definir localmente>
-HOST_DB_PATH=/srv/data-assistant/data/source.sqlite3
-RUNTIME_DIR=/srv/data-assistant/runtime
+HOST_DB_PATH=/home/atila/assistente-virtual-dados/data/anexo_desafio_1.db
+RUNTIME_DIR=/home/atila/assistente-virtual-dados/runtime
 OPENROUTER_FREE_DAILY_REQUEST_LIMIT=45
 MAX_QUESTION_CHARS=2000
 MAX_CONCURRENT_QUESTIONS=2
 APP_REQUESTS_PER_MINUTE=5
 ```
 
-Não copie essas linhas preenchidas para tickets, logs ou Git. Copie o arquivo SQLite
-para `data/` sem colocá-lo na imagem; torne-o legível pelo container, mas não gravável.
+Não copie essas linhas preenchidas para tickets, logs ou Git. Preserve o arquivo SQLite
+em `data/anexo_desafio_1.db` fora da imagem; torne-o legível pelo container, mas não gravável.
 O mount de banco em `compose.yaml` é `read_only` e não cria arquivo no host se estiver
 ausente. Confirme a fonte com `docker compose exec -T app python
 scripts/validate_dataset.py --db /data/source.sqlite3`.
@@ -109,7 +115,7 @@ No firewall, permita somente o SSH administrativo conforme a política local. Bl
 8501/TCP de entrada. Permita saída necessária para Docker/GHCR, OpenRouter e
 [conexões do Cloudflare Tunnel][tunnel-firewall]. Não exponha o socket Docker. Verifique
 as portas com a ferramenta nativa do SO e `docker compose ps`; a coluna `PORTS` deve
-mostrar somente `8501/tcp`, sem `0.0.0.0:8501` ou `:::8501`.
+mostrar somente `127.0.0.1:8501->8501/tcp`, sem `0.0.0.0:8501` ou `:::8501`.
 
 Instale `deploy/deploy-root.sh` em `/usr/local/sbin/data-assistant-deploy`, dono root,
 modo 0755, e `deploy/deploy-wrapper.sh` em `/usr/local/bin/data-assistant-deploy-wrapper`
@@ -126,7 +132,8 @@ O `sudoers` deve autorizar essa conta **apenas** a executar
 O wrapper valida uma tag `sha-` de 40 caracteres hexadecimais e nunca avalia o comando
 SSH recebido. O script root valida a tag novamente, usa somente o repositório GHCR
 fixo, espera o health check e volta à última tag saudável se necessário. O diretório
-`/srv/data-assistant` e os scripts de deploy não podem ser editáveis pela conta SSH.
+`/home/atila/assistente-virtual-dados/` e os scripts de deploy não podem ser editáveis
+pela conta SSH restrita; preserve as permissões dos arquivos de runtime existentes.
 
 O pacote GHCR precisa ser legível pelo servidor: torná-lo público é o caminho mais
 simples para esta demonstração; se permanecer privado, configure no servidor um token
