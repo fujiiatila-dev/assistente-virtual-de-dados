@@ -32,14 +32,14 @@ def test_png_failure_preserves_interactive_chart(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(app_module.st, "plotly_chart", chart)
     monkeypatch.setattr(app_module.st, "columns", lambda count: [download])
     monkeypatch.setattr(app_module.st, "info", info)
-    monkeypatch.setattr(app_module, "_is_dark_theme", lambda mode: False)
+    monkeypatch.setattr(app_module, "_is_dark_theme", lambda: False)
     monkeypatch.setattr(
         app_module, "_cached_png", lambda *args: (None, "Chrome/Chromium não encontrado")
     )
 
     app_module._render_visualization(
         _answer([{"canal": "App", "total": 2}], "bar"),
-        key_prefix="teste", theme_mode="Light",
+        key_prefix="teste",
     )
 
     chart.assert_called_once()
@@ -59,7 +59,7 @@ def test_ambiguous_line_falls_back_to_table_and_csv(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(app_module.st, "warning", warning)
     monkeypatch.setattr(app_module.st, "columns", lambda count: [csv_slot, png_slot])
     monkeypatch.setattr(app_module.st, "info", Mock())
-    monkeypatch.setattr(app_module, "_is_dark_theme", lambda mode: False)
+    monkeypatch.setattr(app_module, "_is_dark_theme", lambda: False)
     monkeypatch.setattr(app_module, "_cached_png", lambda *args: (None, "PNG indisponível"))
 
     app_module._render_visualization(
@@ -70,7 +70,7 @@ def test_ambiguous_line_falls_back_to_table_and_csv(monkeypatch: pytest.MonkeyPa
             ],
             "line",
         ),
-        key_prefix="teste", theme_mode="Light",
+        key_prefix="teste",
     )
 
     chart.assert_not_called()

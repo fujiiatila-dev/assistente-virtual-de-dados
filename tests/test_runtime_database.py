@@ -46,7 +46,7 @@ def test_public_query_parameter_cannot_select_runtime_database(
     assert not missing.exists()
 
 
-def test_sidebar_shows_configured_openrouter_model(
+def test_sidebar_shows_actual_free_router_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _renamed_database(tmp_path)
@@ -57,9 +57,7 @@ def test_sidebar_shows_configured_openrouter_model(
     app.run(timeout=30)
 
     assert not app.exception
-    assert any(
-        "Modelo · anthropic/claude-sonnet-4" in caption.value for caption in app.caption
-    )
+    assert any("Modelo · openrouter/free" in caption.value for caption in app.caption)
 
 
 def test_invalid_runtime_path_does_not_create_file(tmp_path: Path) -> None:

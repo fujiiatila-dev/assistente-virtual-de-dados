@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from base64 import b64encode
 from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any, cast
@@ -11,7 +12,7 @@ import streamlit as st
 
 from data_assistant.assistant import DataAssistant, resolve_database_path
 from data_assistant.contract import AssistantAnswer, Visualization, VisualizationType
-from data_assistant.llm import LLMSettings, resolve_model_name
+from data_assistant.llm import DEFAULT_MODEL, LLMSettings
 from data_assistant.visualization import (
     ImageExportError,
     VisualizationRenderError,
@@ -35,6 +36,7 @@ VISUAL_LABELS: dict[VisualizationType, str] = {
     "line": "Linha",
     "metric": "Métrica",
 }
+ROBOT_ASSET = Path(__file__).resolve().parent / "assets" / "robot.svg"
 
 MATERIAL_STYLES = """
 <style>
@@ -46,7 +48,6 @@ MATERIAL_STYLES = """
   --da-ink: oklch(0.22 0.025 265);
   --da-muted: oklch(0.46 0.025 265);
   --da-outline: oklch(0.86 0.012 265);
-  --da-success: oklch(0.48 0.12 150);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -56,8 +57,21 @@ MATERIAL_STYLES = """
     --da-ink: oklch(0.94 0.008 265);
     --da-muted: oklch(0.72 0.018 265);
     --da-outline: oklch(0.34 0.018 265);
-    --da-success: oklch(0.72 0.12 150);
   }
+}
+.da-brand {
+  align-items: center;
+  color: var(--da-ink);
+  display: flex;
+  font-size: 0.92rem;
+  font-weight: 650;
+  gap: 0.7rem;
+  line-height: 1.25;
+  margin: 0.2rem 0 1rem;
+}
+.da-brand img {
+  height: 2.25rem;
+  width: 2.25rem;
 }
 .da-header {
   padding: 0.6rem 0 1.4rem;
@@ -89,12 +103,46 @@ MATERIAL_STYLES = """
 }
 .da-empty strong { display: block; margin-bottom: 0.35rem; }
 .da-empty span { color: var(--da-muted); line-height: 1.5; }
-.da-db-label {
+.da-loading {
+  align-items: center;
   color: var(--da-muted);
-  font-size: 0.875rem;
-  margin-bottom: 0.35rem;
+  display: flex;
+  font-size: 0.95rem;
+  gap: 0.75rem;
+  min-height: 2.5rem;
+  padding: 0.35rem 0;
+}
+.da-loading-mark {
+  display: inline-block;
+  flex: 0 0 2rem;
+  height: 2rem;
+  position: relative;
+  width: 2rem;
+}
+.da-loading-mark span {
+  animation: da-pulse 0.95s ease-in-out infinite;
+  animation-delay: calc(var(--i) * -0.14s);
+  background: var(--da-primary);
+  border-radius: 999px;
+  height: 0.6rem;
+  left: 0.875rem;
+  opacity: 0.28;
+  position: absolute;
+  top: 0.1rem;
+  transform: rotate(calc(var(--i) * 60deg));
+  transform-origin: 0.125rem 0.9rem;
+  width: 0.25rem;
+}
+@keyframes da-pulse {
+  0%, 100% { opacity: 0.28; }
+  48% { opacity: 1; }
+}
+:where(button, input, textarea, [role="button"]):focus-visible {
+  outline: 2px solid var(--da-primary) !important;
+  outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
+  .da-loading-mark span { animation: none; opacity: 0.85; }
   *, *::before, *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
@@ -104,30 +152,26 @@ MATERIAL_STYLES = """
 """
 
 
-def _theme_override(mode: str) -> str:
-    if mode == "System":
-        return ""
-    if mode == "Dark":
-        tokens = """
-          color-scheme: dark;
-          --da-primary: oklch(0.75 0.12 265);
-          --da-primary-soft: oklch(0.28 0.045 265);
-          --da-surface: oklch(0.19 0.012 265);
-          --da-ink: oklch(0.94 0.008 265);
-          --da-muted: oklch(0.72 0.018 265);
-          --da-outline: oklch(0.34 0.018 265);
-        """
-    else:
-        tokens = """
-          color-scheme: light;
-          --da-primary: oklch(0.48 0.17 265);
-          --da-primary-soft: oklch(0.94 0.035 265);
-          --da-surface: oklch(0.98 0.004 265);
-          --da-ink: oklch(0.22 0.025 265);
-          --da-muted: oklch(0.46 0.025 265);
-          --da-outline: oklch(0.86 0.012 265);
-        """
-    return f"<style>:root {{ {tokens} }}</style>"
+def _brand_markup() -> str:
+    """Render the exact favicon asset with an accessible text alternative."""
+    encoded = b64encode(ROBOT_ASSET.read_bytes()).decode("ascii")
+    return (
+        '<div class="da-brand">'
+        f'<img src="data:image/svg+xml;base64,{encoded}" '
+        'alt="Robô do Assistente Virtual de Dados">'
+        '<span>Assistente Virtual de Dados</span></div>'
+    )
+
+
+def _loading_markup() -> str:
+    capsules = "".join(
+        f'<span style="--i:{index}" aria-hidden="true"></span>' for index in range(6)
+    )
+    return (
+        '<div class="da-loading" role="status" aria-live="polite">'
+        f'<span class="da-loading-mark" aria-hidden="true">{capsules}</span>'
+        '<span>Interpretando a pergunta e consultando o banco…</span></div>'
+    )
 
 
 def _initialize_session(database_path: Path) -> None:
@@ -234,16 +278,38 @@ def _cached_png(
         return None, str(exc)
 
 
-def _is_dark_theme(theme_mode: str) -> bool:
-    if theme_mode == "Dark":
-        return True
-    if theme_mode == "Light":
-        return False
+def _is_dark_theme() -> bool:
+    """Read the effective browser/system theme from Streamlit's context."""
     context_theme = getattr(getattr(st.context, "theme", None), "type", "light")
     return context_theme == "dark"
 
 
-def _render_visualization(answer: AssistantAnswer, *, key_prefix: str, theme_mode: str) -> None:
+def _effective_palette_css() -> str:
+    """Keep custom surfaces aligned with Streamlit's effective system theme."""
+    if _is_dark_theme():
+        tokens = (
+            "color-scheme:dark;"
+            "--da-primary:oklch(0.75 0.12 265);"
+            "--da-primary-soft:oklch(0.28 0.045 265);"
+            "--da-surface:oklch(0.19 0.012 265);"
+            "--da-ink:oklch(0.94 0.008 265);"
+            "--da-muted:oklch(0.72 0.018 265);"
+            "--da-outline:oklch(0.34 0.018 265);"
+        )
+    else:
+        tokens = (
+            "color-scheme:light;"
+            "--da-primary:oklch(0.48 0.17 265);"
+            "--da-primary-soft:oklch(0.94 0.035 265);"
+            "--da-surface:oklch(0.98 0.004 265);"
+            "--da-ink:oklch(0.22 0.025 265);"
+            "--da-muted:oklch(0.46 0.025 265);"
+            "--da-outline:oklch(0.86 0.012 265);"
+        )
+    return f"<style>:root {{{tokens}}}</style>"
+
+
+def _render_visualization(answer: AssistantAnswer, *, key_prefix: str) -> None:
     if not answer.data:
         return
     available = answer.visualization.available_types
@@ -260,7 +326,7 @@ def _render_visualization(answer: AssistantAnswer, *, key_prefix: str, theme_mod
         if selected_type == answer.visualization.type
         else visualization_for_type(answer.data, selected_type, title=answer.visualization.title)
     )
-    dark = _is_dark_theme(theme_mode)
+    dark = _is_dark_theme()
     try:
         figure = build_plotly_figure(answer.data, visualization, dark=dark)
     except VisualizationRenderError as exc:
@@ -321,7 +387,7 @@ def _render_evidence(answer: AssistantAnswer) -> None:
                 st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
-def _render_answer(answer: AssistantAnswer, *, key_prefix: str, theme_mode: str) -> None:
+def _render_answer(answer: AssistantAnswer, *, key_prefix: str) -> None:
     status_renderers = {
         "error": st.error,
         "partial": st.warning,
@@ -334,11 +400,11 @@ def _render_answer(answer: AssistantAnswer, *, key_prefix: str, theme_mode: str)
         st.markdown(answer.response)
     for warning in answer.warnings:
         st.warning(warning)
-    _render_visualization(answer, key_prefix=key_prefix, theme_mode=theme_mode)
+    _render_visualization(answer, key_prefix=key_prefix)
     _render_evidence(answer)
 
 
-def _render_history(messages: list[dict[str, Any]], theme_mode: str) -> None:
+def _render_history(messages: list[dict[str, Any]]) -> None:
     for index, message in enumerate(messages):
         with st.chat_message(message["role"]):
             if message["role"] == "assistant" and isinstance(
@@ -347,41 +413,31 @@ def _render_history(messages: list[dict[str, Any]], theme_mode: str) -> None:
                 _render_answer(
                     message["answer"],
                     key_prefix=f"answer_{index}",
-                    theme_mode=theme_mode,
                 )
             else:
                 st.markdown(str(message["content"]))
 
 
-def _sidebar(database_path: Path) -> tuple[str | None, str]:
+def _sidebar(database_path: Path) -> str | None:
     selected_question: str | None = None
     with st.sidebar:
         st.subheader("Assistente de Dados")
-        st.caption("Consultas auditáveis em SQLite")
+        st.caption("Perguntas de negócio com SQL auditável")
         st.divider()
-        st.markdown('<p class="da-db-label">Fonte de dados</p>', unsafe_allow_html=True)
+        st.caption("FONTE DE DADOS")
+        st.caption(f"Fonte de dados · {database_path.name}")
         if database_path.is_file():
-            st.success(f"Conectado · {database_path.name}", icon="✅")
+            st.caption("Pronta para consultas somente leitura")
         else:
-            st.error(f"Banco ausente · {database_path.name}", icon="⚠️")
-            st.caption("Configure DB_PATH no arquivo .env e reinicie a aplicação.")
-        st.caption(f"Modelo · {resolve_model_name()}")
+            st.error("Banco ausente. Configure DB_PATH e reinicie a aplicação.")
+        st.caption(f"Modelo · {DEFAULT_MODEL}")
         if st.session_state.get("byok_api_key"):
             st.caption("Chave própria ativa somente nesta sessão")
             if st.button("Limpar minha chave", key="byok_clear"):
                 _clear_session_key(st.session_state, database_path)
                 st.rerun()
-        theme_mode = st.selectbox(
-            "Tema",
-            options=("System", "Light", "Dark"),
-            key="theme_mode",
-            help=(
-                "O tema System segue o navegador. Os overrides ajustam superfícies próprias "
-                "e visualizações; controles nativos seguem a configuração do Streamlit."
-            ),
-        )
         st.divider()
-        st.subheader("Perguntas para explorar")
+        st.caption("EXPLORE OS DADOS")
         for index, question in enumerate(EXAMPLE_QUESTIONS, start=1):
             if st.button(
                 question,
@@ -392,23 +448,23 @@ def _sidebar(database_path: Path) -> tuple[str | None, str]:
                 selected_question = question
         st.divider()
         st.caption("As consultas são validadas e executadas somente para leitura.")
-    return selected_question, str(theme_mode)
+    return selected_question
 
 
 def main() -> None:
     st.set_page_config(
         page_title="Assistente Virtual de Dados",
-        page_icon="📊",
+        page_icon=str(ROBOT_ASSET),
         layout="wide",
         initial_sidebar_state="expanded",
     )
     st.markdown(MATERIAL_STYLES, unsafe_allow_html=True)
+    st.markdown(_effective_palette_css(), unsafe_allow_html=True)
     database_path = _query_database_path()
     _initialize_session(database_path)
-    selected_question, theme_mode = _sidebar(database_path)
-    override = _theme_override(theme_mode)
-    if override:
-        st.markdown(override, unsafe_allow_html=True)
+    selected_question = _sidebar(database_path)
+
+    st.markdown(_brand_markup(), unsafe_allow_html=True)
 
     st.markdown(
         """
@@ -422,7 +478,7 @@ def main() -> None:
     )
 
     messages: list[dict[str, Any]] = st.session_state.messages
-    _render_history(messages, theme_mode)
+    _render_history(messages)
     had_pending = bool(st.session_state.get("pending_question"))
     retry_question = _render_byok_controls(database_path)
     if not messages:
@@ -449,10 +505,14 @@ def main() -> None:
     with st.chat_message("user"):
         st.markdown(question)
     with st.chat_message("assistant"):
-        with st.spinner("Interpretando a pergunta e consultando o banco…"):
+        loading = st.empty()
+        loading.markdown(_loading_markup(), unsafe_allow_html=True)
+        try:
             assistant: DataAssistant = st.session_state.assistant
             answer = assistant.ask(question)
-        _render_answer(answer, key_prefix=f"answer_{len(messages)}", theme_mode=theme_mode)
+        finally:
+            loading.empty()
+        _render_answer(answer, key_prefix=f"answer_{len(messages)}")
     messages.append({"role": "assistant", "content": answer.response, "answer": answer})
     if answer.operational_code in ("quota_exhausted", "invalid_key"):
         st.session_state.pending_question = question

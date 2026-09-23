@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="robot-title">
+  <title id="robot-title">Robô do Assistente Virtual de Dados</title>
+  <path d="M32 7v8" stroke="#304579" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="32" cy="6" r="3.5" fill="#E98945" stroke="#304579" stroke-width="2"/>
+  <rect x="7" y="27" width="7" height="15" rx="3.5" fill="#E98945" stroke="#304579" stroke-width="2.5"/>
+  <rect x="50" y="27" width="7" height="15" rx="3.5" fill="#E98945" stroke="#304579" stroke-width="2.5"/>
+  <rect x="12" y="15" width="40" height="38" rx="12" fill="#F8F4EC" stroke="#304579" stroke-width="3.5"/>
+  <path d="M24 35h16" stroke="#304579" stroke-width="2.5" stroke-linecap="round" opacity=".25"/>
+  <circle cx="24" cy="31" r="3.5" fill="#304579"/>
+  <circle cx="40" cy="31" r="3.5" fill="#304579"/>
+  <path d="M25 43c4 3 10 3 14 0" stroke="#E98945" stroke-width="3" stroke-linecap="round"/>
+</svg>
