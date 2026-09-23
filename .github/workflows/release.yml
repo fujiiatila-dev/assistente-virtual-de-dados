@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     if: >-
-      github.repository == 'fujiiatila-dev/assistente-virtual-dados' &&
+      github.repository == 'fujiiatila-dev/assistente-virtual-de-dados' &&
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -49,13 +49,13 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/fujiiatila-dev/assistente-virtual-dados:sha-${{ github.event.workflow_run.head_sha }}
+          tags: ghcr.io/fujiiatila-dev/assistente-virtual-de-dados:sha-${{ github.event.workflow_run.head_sha }}
 
   deploy:
     needs: build
     if: >-
       always() &&
-      github.repository == 'fujiiatila-dev/assistente-virtual-dados' &&
+      github.repository == 'fujiiatila-dev/assistente-virtual-de-dados' &&
       vars.PRODUCTION_READY == 'true' &&
       (needs.build.result == 'success' ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))

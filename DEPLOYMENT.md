@@ -4,15 +4,49 @@ Este runbook prepara uma demonstração pública sem login. O origin só recebe 
 internas do `cloudflared`; não publique a porta 8501. Não execute a seção de servidor
 antes de confirmar o sistema operacional, o plano da zona Cloudflare e o inventário DNS.
 
+## Próximos passos
+
+O código já foi enviado para `https://github.com/fujiiatila-dev/assistente-virtual-de-dados`
+na branch `main`. O primeiro ciclo de Actions/GHCR ainda precisa ser conferido. A
+implantação pública não está ativa.
+
+1. **Confirmar a máquina:** informar versão e arquitetura do Ubuntu/Debian; em seguida,
+   testar acesso administrativo e registrar capacidade, disco e conectividade de saída.
+2. **Revisar DNS:** exportar a zona `nalk.com.br`, inventariar os registros e avaliar
+   plano Cloudflare e impacto da delegação. Não alterar nameservers até aprovar inventário
+   e reversão.
+3. **Validar GitHub:** conferir o primeiro workflow de CI em `main`, permissões de Actions
+   e publicação GHCR. Proteger `main`; preparar Environment `production` e secrets conforme
+   a seção abaixo. `gh auth login` permite consultar runs com o CLI; não envie credenciais
+   por chat.
+4. **Preparar segredos e dados:** criar chave OpenRouter com limite próprio, token dedicado
+   do Tunnel e chave SSH de deploy; validar o banco fictício. Guardar tudo diretamente nos
+   destinos de runtime/secrets, sem passar por Git, logs ou chat.
+5. **Provisionar o servidor:** instalar Docker suportado pela distribuição, criar os
+   diretórios root-owned, arquivos `.env`/`runtime/tunnel.env` com modo 0600, banco externo
+   somente leitura, scripts root-owned, usuário SSH restrito e regra sudo mínima. Bloquear
+   entrada em 8501 e testar saída para GHCR, OpenRouter e Cloudflare Tunnel.
+6. **Ativar publicação:** tornar o pacote GHCR legível pelo host; configurar Environment e
+   secrets; criar o Tunnel e rota para `http://app:8501`; aplicar WAF/rate limit sem Access;
+   só então definir `PRODUCTION_READY=true` e executar deploy aprovado.
+7. **Aceitar ou reverter:** validar HTTPS/WebSocket, cinco perguntas, quota/BYOK, exports,
+   tema, WAF, logs e ausência de porta pública; guardar evidências sem dados sensíveis. Se
+   algum gate falhar, manter `PRODUCTION_READY` desativada e corrigir antes da divulgação.
+
+Não avance para os passos 5–7 antes de concluir os pré-requisitos dos passos 1–4.
+
 ## Estado e pré-requisitos
 
 - [ ] Versão e arquitetura Ubuntu/Debian do servidor confirmadas; acesso
   administrativo já informado, mas ainda não testado.
-- [ ] Repositório `fujiiatila-dev/assistente-virtual-dados` acessível, branch `main`
-  protegida, Actions e GHCR habilitados.
-- [ ] Zona `nalk.com.br` e registros atuais inventariados; janela de DNS aprovada.
-- [ ] Chave OpenRouter compartilhada com limite próprio, token do Tunnel e chave SSH de
-  deploy dedicados, criados fora do Git e nunca enviados por chat.
+- [x] Repositório `fujiiatila-dev/assistente-virtual-de-dados` criado e `main` enviado.
+- [ ] Branch `main` protegida; Actions e GHCR habilitados e primeiro CI revisado.
+- [ ] Acesso à zona Cloudflare informado; inventário DNS e janela de alteração ainda
+  precisam ser confirmados.
+- [ ] Estratégia SSH dedicada confirmada; par de chaves, usuário restrito e host key
+  ainda precisam ser provisionados/verificados fora do Git.
+- [ ] Chave OpenRouter com limite próprio e token dedicado do Tunnel ainda precisam ser
+  criados diretamente nos destinos de runtime, sem serem enviados por chat.
 - [ ] Cópia aprovada do banco fictício disponível fora do checkout e verificada pelo
   `scripts/validate_dataset.py` sem alterar o arquivo.
 
@@ -114,7 +148,7 @@ GitHub usa apenas `GITHUB_TOKEN` com `packages: write`.
    Mypy, dataset quando o anexo externo existir e Gitleaks no histórico. Testes
    com chamadas reais ao OpenRouter permanecem opt-in.
 4. Após CI verde de um push em `main`, `Publish and deploy` constrói a imagem (inclui
-   smoke PNG) e publica `ghcr.io/fujiiatila-dev/assistente-virtual-dados:sha-<commit>`.
+   smoke PNG) e publica `ghcr.io/fujiiatila-dev/assistente-virtual-de-dados:sha-<commit>`.
    Com `PRODUCTION_READY=true`, aciona a conta SSH restrita após aprovação do
    Environment; o script do servidor exige health check, smoke do banco montado,
    exportação PNG e varredura de marcadores sensíveis nos logs antes de registrar

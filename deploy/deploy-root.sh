@@ -16,7 +16,7 @@ fi
 deploy_dir=/srv/data-assistant
 state_dir=/var/lib/data-assistant
 state_file="$state_dir/deployed-image"
-image_prefix=ghcr.io/fujiiatila-dev/assistente-virtual-dados
+image_prefix=ghcr.io/fujiiatila-dev/assistente-virtual-de-dados
 
 if [[ ! -f "$deploy_dir/compose.yaml" || ! -f "$deploy_dir/.env" ||
       ! -s "$deploy_dir/runtime/tunnel.env" ]]; then
