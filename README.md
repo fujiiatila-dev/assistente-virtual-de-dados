@@ -51,9 +51,10 @@ exclusiva com limite de gastos e/ou validade curta.
   Barras temporais usam períodos em ordem cronológica e séries lado a lado por dimensão.
   Duplicidades ambíguas acionam fallback para tabela com aviso.
 - **Interface:** componentes nativos do Streamlit, textos em pt-BR e estilo inspirado em
-  Material 3. O padrão segue `Sistema`; o controle discreto `Tema` permite escolher
-  `Sistema`, `Claro` ou `Escuro` apenas na sessão atual. A paleta dos gráficos acompanha
-  a aparência efetiva.
+  Material 3. `System` é o padrão. Use o menu nativo no canto superior direito e escolha
+  `Theme` para alternar entre `Light` e `Dark`; essa configuração altera toda a interface,
+  incluindo sidebar e controles. As superfícies próprias herdam o tema ativo e os gráficos
+  interativos usam o tema do Streamlit; não há seletor de tema dentro do app.
 
 O enunciado especifica `google/gemini-2.5-flash` configurável por
 `OPENROUTER_MODEL`. A versão pública atual, porém, fixa `openrouter/free` para os

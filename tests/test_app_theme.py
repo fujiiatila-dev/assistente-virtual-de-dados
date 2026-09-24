@@ -9,54 +9,43 @@ import app as app_module
 
 
 @pytest.mark.parametrize(("system_theme", "dark"), [("light", False), ("dark", True)])
-def test_chart_palette_follows_effective_system_theme(
+def test_export_theme_follows_native_streamlit_theme(
     system_theme: str, dark: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(app_module.st, "session_state", {})
     monkeypatch.setattr(
         app_module.st, "context", SimpleNamespace(theme=SimpleNamespace(type=system_theme))
     )
     assert app_module._is_dark_theme() is dark
-    assert f"color-scheme:{system_theme}" in app_module._effective_palette_css()
 
 
-def test_theme_override_is_session_local_and_can_return_to_system(
+def test_legacy_session_override_does_not_override_streamlit_theme(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session: dict[str, str] = {"appearance_choice": "Escuro"}
-    monkeypatch.setattr(app_module.st, "session_state", session)
+    monkeypatch.setattr(app_module.st, "session_state", {"theme_override": "dark"})
     monkeypatch.setattr(
         app_module.st, "context", SimpleNamespace(theme=SimpleNamespace(type="light"))
     )
 
-    app_module._theme_choice_changed()
-    assert session["theme_override"] == "dark"
-    assert app_module._is_dark_theme() is True
-
-    session["appearance_choice"] = "Claro"
-    app_module._theme_choice_changed()
-    assert session["theme_override"] == "light"
-    assert app_module._is_dark_theme() is False
-
-    session["appearance_choice"] = "Sistema"
-    app_module._theme_choice_changed()
-    assert "theme_override" not in session
     assert app_module._is_dark_theme() is False
 
 
-def test_theme_control_is_discreet_and_has_system_default() -> None:
+def test_native_settings_menu_controls_app_theme_without_custom_override() -> None:
     source = (app_module.Path(app_module.__file__).read_text(encoding="utf-8"))
-    assert "def _render_theme_control" in source
-    assert "st.popover(" in source
-    assert 'options=("Sistema", "Claro", "Escuro")' in source
-    assert 'st.session_state["theme_override"] = "dark"' in source
-    assert "theme_mode" not in source
-    assert "@media (prefers-color-scheme: dark)" in app_module.MATERIAL_STYLES
+    assert "_render_theme_control" not in source
+    assert "_theme_choice_changed" not in source
+    assert "appearance_choice" not in source
+    assert "theme_override" not in source
+    assert "@media (prefers-color-scheme: dark)" not in app_module.MATERIAL_STYLES
+    assert "--background-color:" not in source
+    assert "color-scheme:" not in source
+    assert 'theme="streamlit"' in source
+    assert "color: inherit" in app_module.MATERIAL_STYLES
+    assert "background: currentColor" in app_module.MATERIAL_STYLES
     configuration = tomllib.loads(
         (app_module.Path(app_module.__file__).parent / ".streamlit" / "config.toml").read_text(
             encoding="utf-8"
         )
     )
-    assert configuration["client"]["toolbarMode"] == "minimal"
+    assert configuration["client"]["toolbarMode"] == "viewer"
     assert configuration["client"]["showErrorDetails"] == "none"
     assert "theme" not in configuration

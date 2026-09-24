@@ -45,28 +45,9 @@ ROBOT_ASSET = Path(__file__).resolve().parent / "assets" / "robot.svg"
 
 MATERIAL_STYLES = """
 <style>
-:root {
-  color-scheme: light dark;
-  --da-primary: oklch(0.48 0.17 265);
-  --da-primary-soft: oklch(0.94 0.035 265);
-  --da-surface: oklch(0.98 0.004 265);
-  --da-ink: oklch(0.22 0.025 265);
-  --da-muted: oklch(0.46 0.025 265);
-  --da-outline: oklch(0.86 0.012 265);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --da-primary: oklch(0.75 0.12 265);
-    --da-primary-soft: oklch(0.28 0.045 265);
-    --da-surface: oklch(0.19 0.012 265);
-    --da-ink: oklch(0.94 0.008 265);
-    --da-muted: oklch(0.72 0.018 265);
-    --da-outline: oklch(0.34 0.018 265);
-  }
-}
 .da-brand {
   align-items: center;
-  color: var(--da-ink);
+  color: inherit;
   display: flex;
   font-size: 0.92rem;
   font-weight: 650;
@@ -83,7 +64,7 @@ MATERIAL_STYLES = """
   max-width: 72ch;
 }
 .da-header h1 {
-  color: var(--da-ink);
+  color: inherit;
   font-size: 2rem;
   letter-spacing: -0.025em;
   line-height: 1.18;
@@ -91,26 +72,27 @@ MATERIAL_STYLES = """
   text-wrap: balance;
 }
 .da-header p {
-  color: var(--da-muted);
+  color: inherit;
   font-size: 1rem;
   line-height: 1.55;
   margin: 0;
   max-width: 68ch;
+  opacity: 0.78;
   text-wrap: pretty;
 }
 .da-empty {
-  background: var(--da-primary-soft);
-  border: 1px solid var(--da-outline);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
   border-radius: 1rem;
-  color: var(--da-ink);
+  color: inherit;
   margin: 1.5rem 0;
   padding: 1.25rem 1.4rem;
 }
 .da-empty strong { display: block; margin-bottom: 0.35rem; }
-.da-empty span { color: var(--da-muted); line-height: 1.5; }
+.da-empty span { color: inherit; line-height: 1.5; opacity: 0.78; }
 .da-loading {
   align-items: center;
-  color: var(--da-muted);
+  color: inherit;
   display: flex;
   font-size: 0.95rem;
   gap: 0.75rem;
@@ -127,7 +109,7 @@ MATERIAL_STYLES = """
 .da-loading-mark span {
   animation: da-pulse 0.95s ease-in-out infinite;
   animation-delay: calc(var(--i) * -0.14s);
-  background: var(--da-primary);
+  background: currentColor;
   border-radius: 999px;
   height: 0.6rem;
   left: 0.875rem;
@@ -139,17 +121,18 @@ MATERIAL_STYLES = """
   width: 0.25rem;
 }
 .da-progress-note {
-  color: var(--da-muted);
+  color: inherit;
   font-size: 0.85rem;
   margin: 0.2rem 0 0.6rem 2.75rem;
   max-width: 68ch;
+  opacity: 0.78;
 }
 @keyframes da-pulse {
   0%, 100% { opacity: 0.28; }
   48% { opacity: 1; }
 }
 :where(button, input, textarea, [role="button"]):focus-visible {
-  outline: 2px solid var(--da-primary) !important;
+  outline: 2px solid currentColor !important;
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -194,39 +177,6 @@ def _initialize_session(database_path: Path) -> None:
         settings = LLMSettings.for_session_key(personal_key) if personal_key else None
         st.session_state.assistant = DataAssistant(database_path, llm_settings=settings)
         st.session_state.assistant_database_path = str(database_path)
-
-
-def _theme_choice_changed() -> None:
-    """Persist the appearance choice for the current Streamlit session only."""
-    selected = st.session_state.get("appearance_choice", "Sistema")
-    if selected == "Claro":
-        st.session_state["theme_override"] = "light"
-    elif selected == "Escuro":
-        st.session_state["theme_override"] = "dark"
-    else:
-        st.session_state.pop("theme_override", None)
-
-
-def _render_theme_control() -> None:
-    """Keep the optional theme override in a compact, keyboard-accessible popover."""
-    choices = {"system": "Sistema", "light": "Claro", "dark": "Escuro"}
-    override = st.session_state.get("theme_override", "system")
-    initial_choice = choices.get(override, "Sistema")
-    if "appearance_choice" not in st.session_state:
-        st.session_state["appearance_choice"] = initial_choice
-
-    _, control_column = st.columns([0.82, 0.18], gap="small")
-    with control_column, st.popover(
-        "Tema",
-        icon=":material/contrast:",
-        help="Aparência da interface nesta sessão",
-    ):
-        st.radio(
-            "Aparência da interface",
-            options=("Sistema", "Claro", "Escuro"),
-            key="appearance_choice",
-            on_change=_theme_choice_changed,
-        )
 
 
 def _activate_session_key(
@@ -328,47 +278,9 @@ def _is_dark_theme() -> bool:
 
 
 def _effective_theme() -> str:
-    """Resolve a per-session override, falling back to Streamlit's system theme."""
-    override = st.session_state.get("theme_override", "system")
-    if override in ("light", "dark"):
-        return str(override)
+    """Read the viewer's active theme from Streamlit's built-in settings menu."""
     context_theme = getattr(getattr(st.context, "theme", None), "type", "light")
     return "dark" if context_theme == "dark" else "light"
-
-
-def _effective_palette_css() -> str:
-    """Keep native controls and custom surfaces aligned with the effective theme."""
-    if _effective_theme() == "dark":
-        tokens = (
-            "color-scheme:dark;"
-            "--primary-color:#b9c5ff;"
-            "--background-color:#111318;"
-            "--secondary-background-color:#1b1c22;"
-            "--text-color:#e5e2e9;"
-            "--border-color:#3a3b43;"
-            "--da-primary:oklch(0.75 0.12 265);"
-            "--da-primary-soft:oklch(0.28 0.045 265);"
-            "--da-surface:oklch(0.19 0.012 265);"
-            "--da-ink:oklch(0.94 0.008 265);"
-            "--da-muted:oklch(0.72 0.018 265);"
-            "--da-outline:oklch(0.34 0.018 265);"
-        )
-    else:
-        tokens = (
-            "color-scheme:light;"
-            "--primary-color:#5262bd;"
-            "--background-color:#fbf9ff;"
-            "--secondary-background-color:#f1f0f7;"
-            "--text-color:#191a20;"
-            "--border-color:#c6c5d0;"
-            "--da-primary:oklch(0.48 0.17 265);"
-            "--da-primary-soft:oklch(0.94 0.035 265);"
-            "--da-surface:oklch(0.98 0.004 265);"
-            "--da-ink:oklch(0.22 0.025 265);"
-            "--da-muted:oklch(0.46 0.025 265);"
-            "--da-outline:oklch(0.86 0.012 265);"
-        )
-    return f"<style>:root, .stApp {{{tokens}}}</style>"
 
 
 def _progress_markup(snapshot: ExecutionSnapshot) -> str:
@@ -406,18 +318,23 @@ def _render_visualization(answer: AssistantAnswer, *, key_prefix: str) -> None:
     )
     dark = _is_dark_theme()
     try:
-        figure = build_plotly_figure(answer.data, visualization, dark=dark)
+        figure = build_plotly_figure(answer.data, visualization)
     except VisualizationRenderError as exc:
         st.warning(f"Não foi possível montar o gráfico: {exc} Exibindo a tabela.")
         visualization = visualization_for_type(
             answer.data, "table", title=answer.visualization.title
         )
-        figure = build_plotly_figure(answer.data, visualization, dark=dark)
+        figure = build_plotly_figure(answer.data, visualization)
 
     if visualization.type == "table":
         st.dataframe(answer.data, use_container_width=True, hide_index=True)
     else:
-        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            config={"displayModeBar": False},
+            theme="streamlit",
+        )
 
     data_json = json.dumps(answer.data, ensure_ascii=False, default=str, sort_keys=True)
     png, png_error = _cached_png(data_json, visualization.model_dump_json(), dark)
@@ -608,7 +525,6 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     st.markdown(MATERIAL_STYLES, unsafe_allow_html=True)
-    st.markdown(_effective_palette_css(), unsafe_allow_html=True)
     database_path = _query_database_path()
     _initialize_session(database_path)
     active_execution_id = st.session_state.get("active_execution_id")
@@ -616,8 +532,6 @@ def main() -> None:
         active_execution_id = None
     busy = active_execution_id is not None
     selected_question = _sidebar(database_path, busy=busy)
-    _render_theme_control()
-
     st.markdown(_brand_markup(), unsafe_allow_html=True)
 
     st.markdown(

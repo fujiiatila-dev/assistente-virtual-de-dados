@@ -124,10 +124,12 @@ an actionable message without creating or overwriting a file.
 ## Interface
 
 The sidebar shows the source and model and exposes five demo questions. By default, the
-UI follows the system theme. The discreet `Theme` popover switches between `System`,
-`Light`, and `Dark` for the current session only; the plot palette follows the effective
-choice. The robot is both favicon and top brand mark, and the loading indicator respects
-reduced-motion preferences.
+UI follows Streamlit's `System` theme. Open the native menu in the top-right corner and
+choose `Theme` to switch between `Light` and `Dark`. This changes the whole interface,
+including the sidebar and native widgets. App-authored surfaces inherit the active theme,
+and interactive charts use Streamlit's theme. There is no in-app theme selector. The
+robot is both favicon and top brand mark, and the loading indicator respects reduced-motion
+preferences.
 
 Each answer includes:
 

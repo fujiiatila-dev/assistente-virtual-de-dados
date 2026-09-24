@@ -240,6 +240,19 @@ def test_line_labels_omit_non_finite_values() -> None:
     assert figure.data[0].text == ("", "2")
 
 
+def test_figure_without_fixed_palette_can_use_streamlit_native_theme() -> None:
+    visual = Visualization(
+        type="bar",
+        title="Total por canal",
+        x="canal",
+        y=["total"],
+        available_types=["table", "bar"],
+    )
+    figure = build_plotly_figure([{"canal": "App", "total": 2}], visual)
+
+    assert figure.to_plotly_json()["layout"].get("template") == {}
+
+
 @pytest.mark.png
 @pytest.mark.parametrize("visual_type", ["table", "bar", "line", "metric"])
 def test_real_png_export_for_all_visual_types(visual_type: str) -> None:

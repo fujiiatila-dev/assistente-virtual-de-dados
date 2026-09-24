@@ -183,9 +183,11 @@ GitHub usa apenas `GITHUB_TOKEN` com `packages: write`.
 - [ ] Uma pergunta quantitativa por tipo e data retorna `COUNT` agrupado por ambas as
       dimensões; o frontend nunca soma uma amostra bruta limitada. Barras temporais ficam
       em ordem cronológica e agrupadas por dimensão; duplicidades caem para tabela com aviso.
-- [ ] Tema segue claro/escuro do sistema, favicon e logo são o mesmo robô, loader tem
-      seis cápsulas e redução de movimento; o popover `Tema` permite Sistema/Claro/Escuro
-      sem afetar outras sessões. Sidebar não mostra deploy nem cartão verde.
+- [ ] Tema padrão segue `System`; o menu nativo no canto superior direito, em `Theme`, alterna
+      `Light`/`Dark` em toda a interface, inclusive sidebar e controles. Não há seletor
+      de tema dentro do app; superfícies próprias e gráficos acompanham o tema ativo.
+      Favicon e logo são o mesmo robô, loader tem seis cápsulas e respeita redução de
+      movimento. Sidebar não mostra deploy nem cartão verde.
 - [ ] WAF bloqueia somente a carga controlada acima do limite configurado; navegação
       normal, downloads e WebSocket abaixo do limite continuam funcionando.
 - [ ] Logs do app/Tunnel e Actions não exibem chaves, token, prompts completos ou

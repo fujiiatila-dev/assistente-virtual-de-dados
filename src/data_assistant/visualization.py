@@ -360,11 +360,10 @@ def build_plotly_figure(
     data: Sequence[Mapping[str, Any]],
     visualization: Visualization,
     *,
-    dark: bool = False,
+    dark: bool | None = None,
 ) -> go.Figure:
-    """Build the single Plotly representation used on screen and for PNG export."""
+    """Build a Plotly figure, optionally pinning a palette for static image export."""
     rows = [dict(row) for row in data]
-    template = "plotly_dark" if dark else "plotly_white"
     figure = go.Figure()
 
     if visualization.type == "table":
@@ -447,11 +446,13 @@ def build_plotly_figure(
         raise VisualizationRenderError("Tipo de visualização não suportado.")
 
     figure.update_layout(
-        template=template,
         title=None if visualization.type == "metric" else visualization.title,
         margin={"l": 48, "r": 32, "t": 80, "b": 56},
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02},
         hovermode="x unified" if visualization.type == "line" else "closest",
+    )
+    figure.update_layout(
+        template=None if dark is None else "plotly_dark" if dark else "plotly_white"
     )
     if visualization.type == "line":
         temporal_column = visualization.x
