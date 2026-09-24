@@ -40,6 +40,13 @@ views as PNG.
   and safe error states without private chain of thought.
 - Table, bar, line, and metric views; local switching without another query; CSV and
   PNG for tables, PNG for other visuals.
+- Cooperative cancellation and live public progress use an accessible, allow-listed set
+  of operational phases. An HTTP call already sent to the provider is not force-killed;
+  its result is discarded and may have consumed quota.
+- Count questions by date and category use `COUNT`/`GROUP BY` against the runtime schema;
+  the frontend never counts a limited sample of raw rows. Time-based bars are chronological
+  and grouped side by side by dimension. Ambiguous duplicates fall back to a table with a
+  warning.
 
 ## Requirements
 
@@ -117,14 +124,14 @@ an actionable message without creating or overwriting a file.
 ## Interface
 
 The sidebar shows the source and model and exposes five demo questions. By default, the
-UI follows the system theme. Use [⋮ → Settings → Theme](https://docs.streamlit.io/develop/concepts/architecture/app-chrome#settings)
-to choose `Use system setting`, `Light`, or `Dark` in Streamlit's native controls. The
-robot is both favicon and top brand mark, and the loading indicator respects reduced-motion
-preferences.
+UI follows the system theme. The discreet `Theme` popover switches between `System`,
+`Light`, and `Dark` for the current session only; the plot palette follows the effective
+choice. The robot is both favicon and top brand mark, and the loading indicator respects
+reduced-motion preferences.
 
 Each answer includes:
 
-- `status`: `success`, `empty`, `partial`, or `error`;
+- `status`: `success`, `empty`, `partial`, `error`, or `cancelled`;
 - executive text and `warnings`;
 - data and a validated visualization with `available_types`;
 - an expandable panel with operational steps, queries, corrected errors, and samples;
@@ -146,6 +153,19 @@ uv run pytest -m png
 The smoke check validates real PNG bytes in memory without writing an image file. Tests
 marked `png` skip with a clear reason when Chrome is absent; launch failures with an
 installed browser remain test failures.
+
+The live status shows only safe operational phases, never prompts, tokens, in-progress
+SQL, or private reasoning. `Stop execution` prevents later graph stages and queries. If a
+provider request is already in flight, it may complete; its result is discarded and may
+have consumed quota. Cancelled responses do not display partial data or SQL as final.
+
+For a count by time and category, the expected result has one row per combination and an
+aggregated measure (for example, `Purchase | 2024-08-07 | 3`). If the first query returns
+event rows, the graph attempts a `COUNT`/`GROUP BY` refinement. The frontend does not sum
+a potentially limited sample; if the aggregation cannot be validated or the query budget
+is exhausted, it shows an actionable warning and hides raw rows. Selecting `Bars` for a temporal,
+categorical result groups each dimension side by side in chronological order. Ambiguous
+duplicate values fall back to the table with a warning.
 
 ## Docker and deployment
 

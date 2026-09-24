@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Final
 
 from sqlglot import exp, parse_one
 from sqlglot.errors import ParseError
+
+from data_assistant.execution import ExecutionCancelledError
 
 DEFAULT_ROW_LIMIT: Final = 200
 DEFAULT_TIMEOUT_SECONDS: Final = 10.0
@@ -81,24 +84,40 @@ class SQLiteExecutor:
         connection.execute("PRAGMA foreign_keys=ON")
         return connection
 
-    def execute(self, sql: str) -> list[dict[str, object]]:
+    def execute(
+        self,
+        sql: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> list[dict[str, object]]:
         """Execute SQL with a row cap and wall-clock timeout.
 
         SQLite exceptions intentionally retain their original message so the graph can
         provide precise feedback to the SQL correction prompt.
         """
+        if cancel_event is not None and cancel_event.is_set():
+            raise ExecutionCancelledError()
         bounded_sql = enforce_row_limit(sql, self.row_limit)
         connection = self._connect()
         deadline = time.monotonic() + self.timeout_seconds
 
         def interrupt_after_deadline() -> int:
-            return int(time.monotonic() >= deadline)
+            cancelled = cancel_event is not None and cancel_event.is_set()
+            return int(cancelled or time.monotonic() >= deadline)
 
         connection.set_progress_handler(interrupt_after_deadline, 1_000)
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ExecutionCancelledError()
             cursor = connection.execute(bounded_sql)
             rows = cursor.fetchmany(self.row_limit + 1)
+            if cancel_event is not None and cancel_event.is_set():
+                raise ExecutionCancelledError()
             return [dict(row) for row in rows[: self.row_limit]]
+        except sqlite3.OperationalError as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ExecutionCancelledError() from exc
+            raise
         finally:
             connection.set_progress_handler(None, 0)
             connection.close()

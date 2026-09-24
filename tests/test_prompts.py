@@ -15,7 +15,7 @@ def test_generation_contains_schema_categories_and_semantic_rules() -> None:
         'TABLE "campanhas"\n  - "canal" TEXT VALUES [\'WhatsApp\', \'App\']',
         "gráfico de barras",
     )
-    combined = f"{prompt.system}\n{prompt.user}".casefold()
+    combined = " ".join(f"{prompt.system}\n{prompt.user}".casefold().split())
 
     assert "schema descoberto em runtime" in combined
     assert "whatsapp" in combined
@@ -27,6 +27,9 @@ def test_generation_contains_schema_categories_and_semantic_rules() -> None:
     assert "primeiro agregue por categoria e cliente" in combined
     assert "nunca invente" in combined
     assert "somente select ou with" in combined
+    assert "count(*)" in combined
+    assert "agrupe exatamente pelas duas dimensões pedidas" in combined
+    assert "não uma linha por evento" in combined
 
 
 def test_interpretation_mentions_month_and_distinct_semantics() -> None:
@@ -53,6 +56,9 @@ def test_sufficiency_requires_refinement_for_empty_quantitative_result() -> None
     prompt = sufficiency_prompt("Quantos clientes?", "SELECT 1", [])
     assert "resultado vazio nunca basta" in prompt.system.casefold()
     assert "consulta complementar" in prompt.system.casefold()
+    assert " ".join(prompt.system.casefold().split()).find(
+        "uma linha por par período/categoria"
+    ) >= 0
 
 
 def test_formatter_has_closed_visual_menu_and_honest_empty_rule() -> None:

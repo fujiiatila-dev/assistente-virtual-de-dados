@@ -66,6 +66,20 @@ def _column_roles(data: Sequence[Mapping[str, Any]]) -> tuple[list[str], list[st
     return categorical, temporal, numeric
 
 
+def temporal_and_categorical_columns(
+    data: Sequence[Mapping[str, Any]],
+) -> tuple[list[str], list[str]]:
+    """Return the result columns that represent categorical and temporal dimensions."""
+    categorical, temporal, _numeric = _column_roles(data)
+    return categorical, temporal
+
+
+def has_temporal_and_categorical_columns(data: Sequence[Mapping[str, Any]]) -> bool:
+    """Return whether result values expose both time and categorical dimensions."""
+    categorical, temporal = temporal_and_categorical_columns(data)
+    return bool(categorical and temporal)
+
+
 def compatible_visualization_types(
     data: Sequence[Mapping[str, Any]],
 ) -> list[VisualizationType]:
@@ -158,13 +172,26 @@ def normalize_visualization(
         return Visualization(type="table", title=title, available_types=available)
 
     categorical, temporal, numeric = _column_roles(rows)
-    inferred_x = temporal[0] if selected == "line" else (categorical[0] if categorical else None)
+    grouped_temporal_bar = selected == "bar" and bool(temporal and categorical)
+    inferred_x = (
+        temporal[0]
+        if selected == "line" or grouped_temporal_bar
+        else (categorical[0] if categorical else None)
+    )
     if selected == "metric":
         inferred_x = None
-    x = (proposal or {}).get("x") if proposed == selected else inferred_x
+    x = (
+        inferred_x
+        if grouped_temporal_bar
+        else (proposal or {}).get("x")
+        if proposed == selected
+        else inferred_x
+    )
     proposed_y = (proposal or {}).get("y") if proposed == selected else None
     y = proposed_y if isinstance(proposed_y, list) else [numeric[0]]
     group = (proposal or {}).get("group") if proposed == selected else None
+    if grouped_temporal_bar:
+        group = categorical[0]
     return Visualization(
         type=selected,
         title=title,
@@ -199,6 +226,11 @@ def visualization_for_type(
     if visual.type == "line":
         categorical, _, _ = _column_roles(data)
         if len(categorical) == 1:
+            visual.group = categorical[0]
+    elif visual.type == "bar":
+        categorical, temporal, _ = _column_roles(data)
+        if categorical and temporal:
+            visual.x = temporal[0]
             visual.group = categorical[0]
     return visual
 
@@ -258,6 +290,63 @@ def _line_series(
     return prepared
 
 
+def _add_grouped_temporal_bars(
+    figure: go.Figure,
+    rows: Sequence[Mapping[str, Any]],
+    x_column: str,
+    y_columns: Sequence[str],
+    group_column: str,
+) -> None:
+    """Create a chronological trace for every category/measure pair."""
+    period_values: dict[datetime, Any] = {}
+    group_labels: set[str] = set()
+    values: dict[tuple[datetime, str, str], Any] = {}
+    seen: set[tuple[datetime, str, str]] = set()
+
+    for row in rows:
+        raw_period = row.get(x_column)
+        period = _temporal_key(raw_period)
+        period_values.setdefault(period, raw_period)
+        raw_group = row.get(group_column)
+        group_label = str(raw_group) if raw_group is not None else "Sem grupo"
+        group_labels.add(group_label)
+        for measure in y_columns:
+            key = (period, group_label, measure)
+            if key in seen:
+                raise VisualizationRenderError(
+                    "Há mais de um valor para o mesmo período, dimensão e medida. "
+                    "A consulta precisa retornar uma linha por período/dimensão/medida; "
+                    "exibindo tabela."
+                )
+            seen.add(key)
+            if row.get(measure) is not None:
+                values[key] = row[measure]
+
+    periods = sorted(period_values)
+    labels = sorted(group_labels, key=str.casefold)
+    for group_label in labels:
+        for measure in y_columns:
+            y_values = [values.get((period, group_label, measure)) for period in periods]
+            trace_name = (
+                group_label if len(y_columns) == 1 else f"{measure} · {group_label}"
+            )
+            figure.add_trace(
+                go.Bar(
+                    x=[period_values[period] for period in periods],
+                    y=y_values,
+                    name=trace_name,
+                    text=[_value_label(value) for value in y_values],
+                    texttemplate="%{text}",
+                    textposition="outside",
+                    cliponaxis=False,
+                    hovertemplate=(
+                        f"{x_column}: %{{x}}<br>{group_column}: {group_label}"
+                        f"<br>{measure}: %{{y}}<extra>%{{fullData.name}}</extra>"
+                    ),
+                )
+            )
+
+
 def _value_label(value: Any) -> str:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return ""
@@ -306,42 +395,54 @@ def build_plotly_figure(
         y_columns = visualization.y or []
         if not x_column or not y_columns:
             raise VisualizationRenderError("A visualização requer eixos x e y.")
-        grouped = (
-            _line_series(rows, x_column, y_columns, visualization.group)
-            if visualization.type == "line"
-            else _series_for_group(rows, visualization.group) if visualization.group else {"": rows}
+        grouped_temporal = (
+            visualization.type == "bar"
+            and visualization.group is not None
+            and _is_temporal_column(rows, x_column)
         )
-        for group_name, group_rows in grouped.items():
-            for y_column in y_columns:
-                series_rows = (
-                    [row for row in group_rows if row.get(y_column) is not None]
-                    if visualization.type == "line"
-                    else group_rows
-                )
-                label_parts = [part for part in (group_name, y_column) if part]
-                trace_args = {
-                    "x": [row.get(x_column) for row in series_rows],
-                    "y": [row.get(y_column) for row in series_rows],
-                    "name": " · ".join(label_parts),
-                    "text": [_value_label(row.get(y_column)) for row in series_rows],
-                    "hovertemplate": (
-                        f"{x_column}: %{{x}}<br>{y_column}: %{{y}}<extra>%{{fullData.name}}</extra>"
-                    ),
-                    "cliponaxis": False,
-                }
-                if visualization.type == "bar":
-                    figure.add_trace(
-                        go.Bar(**trace_args, texttemplate="%{text}", textposition="outside")
+        if grouped_temporal:
+            _add_grouped_temporal_bars(
+                figure, rows, x_column, y_columns, visualization.group or ""
+            )
+        else:
+            grouped = (
+                _line_series(rows, x_column, y_columns, visualization.group)
+                if visualization.type == "line"
+                else _series_for_group(rows, visualization.group)
+                if visualization.group
+                else {"": rows}
+            )
+            for group_name, group_rows in grouped.items():
+                for y_column in y_columns:
+                    series_rows = (
+                        [row for row in group_rows if row.get(y_column) is not None]
+                        if visualization.type == "line"
+                        else group_rows
                     )
-                else:
-                    # Keep labels even in dense series; hover remains the precise view.
-                    figure.add_trace(
-                        go.Scatter(
-                            **trace_args,
-                            mode="lines+markers+text",
-                            textposition="top center",
+                    label_parts = [part for part in (group_name, y_column) if part]
+                    trace_args = {
+                        "x": [row.get(x_column) for row in series_rows],
+                        "y": [row.get(y_column) for row in series_rows],
+                        "name": " · ".join(label_parts),
+                        "text": [_value_label(row.get(y_column)) for row in series_rows],
+                        "hovertemplate": (
+                            f"{x_column}: %{{x}}<br>{y_column}: %{{y}}"
+                            "<extra>%{fullData.name}</extra>"
+                        ),
+                        "cliponaxis": False,
+                    }
+                    if visualization.type == "bar":
+                        figure.add_trace(
+                            go.Bar(**trace_args, texttemplate="%{text}", textposition="outside")
                         )
-                    )
+                    else:
+                        figure.add_trace(
+                            go.Scatter(
+                                **trace_args,
+                                mode="lines+markers+text",
+                                textposition="top center",
+                            )
+                        )
     else:
         raise VisualizationRenderError("Tipo de visualização não suportado.")
 
@@ -365,6 +466,7 @@ def build_plotly_figure(
             figure.update_xaxes(tickformat="%Y-%m")
         figure.update_yaxes(automargin=True)
     elif visualization.type == "bar":
+        figure.update_layout(barmode="group")
         figure.update_xaxes(automargin=True)
         figure.update_yaxes(automargin=True)
     return figure

@@ -29,6 +29,10 @@ Regras semânticas obrigatórias:
   a 1, sem confundir clientes, envios e total de interações;
 - "média de compras por cliente": primeiro agregue por categoria e cliente, depois calcule
   a média entre clientes.
+- perguntas por quantidade, total ou frequência ao longo do tempo e por categoria: selecione
+  COUNT(*) AS quantidade, mantenha período e categoria no resultado e agrupe exatamente
+  pelas duas dimensões pedidas; retorne uma linha por par, não uma linha por evento. Aplique
+  limites apenas depois da agregação.
 """.strip()
 
 
@@ -115,6 +119,9 @@ Avalie se o resultado permite responder à pergunta sem inventar dados. Retorne 
 {"sufficient": boolean, "reason": string}. Resultado vazio nunca basta para uma pergunta
 quantitativa; peça refinamento. Uma consulta complementar deve agregar informação nova, não
 repetir a consulta anterior.
+Para uma contagem solicitada por período e categoria, exija COUNT selecionado, ambos os
+campos dimensionais visíveis e uma linha por par período/categoria; uma amostra de eventos
+individuais não é suficiente.
 """.strip(),
         user=f"Pergunta: {question}\nSQL: {sql}\nResultado (amostra): {_json(list(result)[:20])}",
     )

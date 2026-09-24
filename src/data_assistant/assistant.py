@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 from data_assistant.configuration import PublicRuntimeSettings
 from data_assistant.contract import AssistantAnswer, Visualization
 from data_assistant.errors import PUBLIC_MESSAGES, LLMOperationalError, OperationalCode
+from data_assistant.execution import (
+    ExecutionCancelledError,
+    ExecutionControl,
+    PublicPhase,
+    cancelled_answer,
+)
 from data_assistant.executor import SQLiteExecutor
 from data_assistant.graph import GraphDependencies, LLMProtocol, build_graph, initial_state
 from data_assistant.limits import SessionRateLimiter, global_concurrency_gate
@@ -109,8 +115,21 @@ class DataAssistant:
                 )
         return self._llm
 
-    def ask(self, question: str, format_hint: str | None = None) -> AssistantAnswer:
+    def ask(
+        self,
+        question: str,
+        format_hint: str | None = None,
+        *,
+        execution_control: ExecutionControl | None = None,
+    ) -> AssistantAnswer:
         """Run one bounded graph execution and always return the public contract."""
+        if execution_control is not None:
+            try:
+                execution_control.checkpoint()
+            except ExecutionCancelledError as exc:
+                return cancelled_answer(
+                    may_have_consumed_quota=exc.may_have_consumed_quota
+                )
         if not question.strip():
             return _error_answer("Informe uma pergunta sobre os dados para iniciar a análise.")
         if len(question) > self.runtime_limits.max_question_chars:
@@ -132,6 +151,9 @@ class DataAssistant:
                 operational_code="rate_limited",
             )
         try:
+            if execution_control is not None:
+                execution_control.publish_progress(PublicPhase.SCHEMA)
+                execution_control.checkpoint()
             if not self._session_rate_limiter.acquire(
                 self.runtime_limits.app_requests_per_minute
             ):
@@ -142,12 +164,15 @@ class DataAssistant:
                 )
             # Validate and cache the source before spending a model call.
             discover_schema(self.database_path, self.schema_cache)
+            if execution_control is not None:
+                execution_control.checkpoint()
             dependencies = GraphDependencies(
                 llm=self._model(),
                 executor=SQLiteExecutor(self.database_path),
                 schema_provider=lambda: discover_schema(self.database_path, self.schema_cache),
                 max_sql_fix_attempts=self.max_sql_fix_attempts,
                 max_query_budget=self.max_query_budget,
+                execution_control=execution_control,
             )
             result = build_graph(dependencies).invoke(
                 initial_state(
@@ -156,6 +181,8 @@ class DataAssistant:
                     query_budget=self.max_query_budget,
                 )
             )
+            if execution_control is not None:
+                execution_control.checkpoint()
             answer = result.get("response")
             if not isinstance(answer, AssistantAnswer):
                 return _error_answer("O fluxo terminou sem produzir uma resposta válida.")
@@ -171,6 +198,10 @@ class DataAssistant:
                     }
                 )
             return answer
+        except ExecutionCancelledError as exc:
+            return cancelled_answer(
+                may_have_consumed_quota=exc.may_have_consumed_quota
+            )
         except LLMOperationalError as exc:
             if self._llm_settings is not None and exc.code == "quota_exhausted":
                 return _error_answer(PERSONAL_QUOTA_MESSAGE, operational_code=exc.code)

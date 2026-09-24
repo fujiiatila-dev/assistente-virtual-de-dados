@@ -12,6 +12,7 @@ OperationalCode = Literal[
     "provider_unavailable",
     "timeout",
     "local_error",
+    "cancelled",
 ]
 
 PUBLIC_MESSAGES: dict[OperationalCode, str] = {
@@ -26,6 +27,7 @@ PUBLIC_MESSAGES: dict[OperationalCode, str] = {
     "provider_unavailable": "O provedor de IA está indisponível. Tente novamente mais tarde.",
     "timeout": "O provedor demorou além do limite. Tente novamente mais tarde.",
     "local_error": "Não foi possível concluir a análise. Confira a fonte e tente novamente.",
+    "cancelled": "A execução foi interrompida a pedido do visitante.",
 }
 
 

@@ -176,8 +176,16 @@ GitHub usa apenas `GITHUB_TOKEN` com `packages: write`.
 - [ ] Quota compartilhada mostra aviso; BYOK aparece somente após clique, aceita uma
       chave da sessão, permite limpar e só repete a pergunta após confirmação explícita.
       Outra sessão não vê a chave nem a pergunta pendente.
+- [ ] Progresso público em tempo real mostra somente fases operacionais acessíveis; não
+      exibe prompt, token, SQL em edição ou raciocínio privado. `Parar execução` impede
+      novas etapas; uma chamada HTTP já enviada pode terminar, é descartada e pode consumir
+      cota.
+- [ ] Uma pergunta quantitativa por tipo e data retorna `COUNT` agrupado por ambas as
+      dimensões; o frontend nunca soma uma amostra bruta limitada. Barras temporais ficam
+      em ordem cronológica e agrupadas por dimensão; duplicidades caem para tabela com aviso.
 - [ ] Tema segue claro/escuro do sistema, favicon e logo são o mesmo robô, loader tem
-      seis cápsulas e redução de movimento, sidebar não mostra deploy nem cartão verde.
+      seis cápsulas e redução de movimento; o popover `Tema` permite Sistema/Claro/Escuro
+      sem afetar outras sessões. Sidebar não mostra deploy nem cartão verde.
 - [ ] WAF bloqueia somente a carga controlada acima do limite configurado; navegação
       normal, downloads e WebSocket abaixo do limite continuam funcionando.
 - [ ] Logs do app/Tunnel e Actions não exibem chaves, token, prompts completos ou

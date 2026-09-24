@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from data_assistant.errors import OperationalCode
 
 VisualizationType = Literal["line", "bar", "table", "metric"]
-AnswerStatus = Literal["success", "empty", "partial", "error"]
+AnswerStatus = Literal["success", "empty", "partial", "error", "cancelled"]
 
 
 def _table_only() -> list[VisualizationType]:

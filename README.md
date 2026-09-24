@@ -43,10 +43,17 @@ exclusiva com limite de gastos e/ou validade curta.
 - **Visualizações:** `table`, `bar`, `line` e `metric`; fallback determinístico para
   tabela quando os dados não atendem ao visual solicitado; troca de visual sem nova
   consulta. Tabelas podem ser exportadas em CSV e PNG; os demais visuais, em PNG.
+- **Execução interativa:** fases operacionais acessíveis mostram o andamento em tempo
+  real. `Parar execução` cancela cooperativamente; uma chamada HTTP já iniciada não é
+  encerrada à força, mas seu retorno é descartado e pode ter consumido cota.
+- **Resumo por dimensões:** perguntas de quantidade por data e categoria usam `COUNT` e
+  `GROUP BY` com o schema descoberto; não contam no frontend apenas linhas brutas limitadas.
+  Barras temporais usam períodos em ordem cronológica e séries lado a lado por dimensão.
+  Duplicidades ambíguas acionam fallback para tabela com aviso.
 - **Interface:** componentes nativos do Streamlit, textos em pt-BR e estilo inspirado em
-  Material 3. O padrão segue `System`; em [⋮ → Settings → Theme](https://docs.streamlit.io/develop/concepts/architecture/app-chrome#settings),
-  o usuário pode escolher `Use system setting`, `Light` ou `Dark`. A paleta dos gráficos
-  acompanha o tema efetivo.
+  Material 3. O padrão segue `Sistema`; o controle discreto `Tema` permite escolher
+  `Sistema`, `Claro` ou `Escuro` apenas na sessão atual. A paleta dos gráficos acompanha
+  a aparência efetiva.
 
 O enunciado especifica `google/gemini-2.5-flash` configurável por
 `OPENROUTER_MODEL`. A versão pública atual, porém, fixa `openrouter/free` para os
@@ -142,13 +149,32 @@ produzir resultados diferentes.
 
 Cada resposta pode apresentar:
 
-- `status`: `success`, `empty`, `partial` ou `error`;
+- `status`: `success`, `empty`, `partial`, `error` ou `cancelled`;
 - texto executivo, dados e `warnings`;
 - visualização validada e seus `available_types`;
 - painel expansível com etapas operacionais, queries executadas, erros corrigidos e
   amostras úteis para conferência.
 
-Falhas produzem mensagens operacionais, sem exibir stack trace cru.
+Falhas produzem mensagens operacionais, sem exibir stack trace cru. O andamento público
+mostra somente fases como leitura do schema, validação da consulta e conferência dos
+resultados; nunca mostra prompt, token, raciocínio privado ou SQL em edição.
+
+Durante uma pergunta, `Parar execução` impede novas etapas e consultas. O cancelamento é
+cooperativo: uma chamada HTTP já enviada pode terminar, seu resultado é descartado e a
+interface avisa que a cota pode ter sido consumida. A execução cancelada não apresenta
+SQL ou dados parciais como resposta final.
+
+Quando a pergunta pede quantidades por período e categoria, o resultado esperado é uma
+linha por combinação com a medida agregada (por exemplo, `Compra | 2024-08-07 | 3`). Se a
+primeira consulta trouxer eventos individuais, o grafo tenta refiná-la com `COUNT` e
+`GROUP BY`. O frontend não soma silenciosamente uma amostra que pode estar limitada; se a
+agregação não puder ser validada ou o orçamento se esgotar, exibe um aviso e oculta as
+linhas brutas em vez de tratá-las como a resposta.
+
+Em resultados com período, categoria e medida numérica, selecionar `Barras` posiciona o
+período no eixo X e exibe as dimensões lado a lado. Se houver mais de um valor para o mesmo
+período/dimensão/medida, o gráfico cai para a tabela e explica que granularidade precisa
+ser corrigida.
 
 A troca de visualização usa os dados já carregados e não executa outra consulta. Se os
 dados não forem compatíveis com o tipo solicitado, a tabela é o fallback previsível.

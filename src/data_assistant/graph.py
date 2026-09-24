@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from sqlglot import exp, parse_one
+from sqlglot.errors import ParseError
 
 from data_assistant.contract import AssistantAnswer
 from data_assistant.errors import LLMOperationalError, OperationalCode
+from data_assistant.execution import (
+    ExecutionCancelledError,
+    ExecutionControl,
+    PublicPhase,
+)
 from data_assistant.prompts import (
     correct_sql_prompt,
     format_answer_prompt,
@@ -23,7 +31,9 @@ from data_assistant.schema import SchemaSnapshot
 from data_assistant.validator import SQLValidationError, validate_sql
 from data_assistant.visualization import (
     compatible_visualization_types,
+    has_temporal_and_categorical_columns,
     normalize_visualization,
+    temporal_and_categorical_columns,
 )
 
 
@@ -38,7 +48,12 @@ class LLMProtocol(Protocol):
 class QueryExecutorProtocol(Protocol):
     """The single query execution operation consumed by the graph."""
 
-    def execute(self, sql: str) -> list[dict[str, object]]: ...
+    def execute(
+        self,
+        sql: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> list[dict[str, object]]: ...
 
 
 class AgentState(TypedDict):
@@ -59,6 +74,7 @@ class AgentState(TypedDict):
     interpretation: dict[str, Any]
     warnings: list[str]
     operational_error: OperationalCode | None
+    aggregation_refinement_attempts: int
     response: AssistantAnswer | None
 
 
@@ -71,6 +87,7 @@ class GraphDependencies:
     schema_provider: Callable[[], SchemaSnapshot]
     max_sql_fix_attempts: int = 3
     max_query_budget: int = 6
+    execution_control: ExecutionControl | None = None
 
 
 def initial_state(
@@ -96,6 +113,7 @@ def initial_state(
         interpretation={},
         warnings=[],
         operational_error=None,
+        aggregation_refinement_attempts=0,
         response=None,
     )
 
@@ -120,19 +138,119 @@ def _strip_sql_fence(text: str) -> str:
     return match.group(1).strip() if match else candidate
 
 
+def _checkpoint(
+    dependencies: GraphDependencies, phase: PublicPhase | None = None
+) -> None:
+    control = dependencies.execution_control
+    if control is None:
+        return
+    control.checkpoint()
+    if phase is not None:
+        control.publish_progress(phase)
+
+
+def _complete_text(
+    dependencies: GraphDependencies, system_prompt: str, user_prompt: str
+) -> str:
+    def operation() -> str:
+        return dependencies.llm.complete(system_prompt, user_prompt)
+
+    if dependencies.execution_control is None:
+        return operation()
+    return dependencies.execution_control.call_provider(operation)
+
+
+def _complete_json(
+    dependencies: GraphDependencies, system_prompt: str, user_prompt: str
+) -> dict[str, Any]:
+    def operation() -> dict[str, Any]:
+        return dependencies.llm.complete_json(system_prompt, user_prompt)
+
+    if dependencies.execution_control is None:
+        return operation()
+    return dependencies.execution_control.call_provider(operation)
+
+
+_COUNT_INTENT = re.compile(
+    r"\b(?:quantos?|quantas?|quantidade|contagem|contar|total|n[uú]mero|qtd)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _expression_key(expression: exp.Expression) -> str:
+    """Normalize simple column references and compound SQL expressions."""
+    if isinstance(expression, exp.Column):
+        return f"column:{expression.name.casefold()}"
+    return expression.sql(dialect="sqlite").casefold()
+
+
+def _dimension_is_grouped(
+    expression: exp.Select, group_expressions: list[exp.Expression], output_column: str
+) -> bool:
+    """Check that a visible time/category result maps to an actual GROUP BY term."""
+    for selected in expression.expressions:
+        if str(selected.alias_or_name).casefold() != output_column.casefold():
+            continue
+        selected_value = selected.this if isinstance(selected, exp.Alias) else selected
+        selected_key = _expression_key(selected_value)
+        for grouped in group_expressions:
+            if (
+                isinstance(grouped, exp.Column)
+                and grouped.name.casefold() == output_column.casefold()
+            ) or _expression_key(grouped) == selected_key:
+                return True
+    return False
+
+
+def _needs_temporal_category_aggregation(
+    question: str, sql: str, rows: list[dict[str, Any]] | None
+) -> bool:
+    """Reject detail rows when a quantitative question asks for time/category groups."""
+    if not rows or not _COUNT_INTENT.search(question):
+        return False
+    if not has_temporal_and_categorical_columns(rows):
+        return False
+    try:
+        expression = parse_one(sql, read="sqlite")
+    except ParseError:
+        return True
+    if not isinstance(expression, exp.Select):
+        return True
+    group = expression.args.get("group")
+    group_expressions = group.expressions if isinstance(group, exp.Group) else []
+    selects_count = any(
+        selected.find(exp.Count) is not None for selected in expression.expressions
+    )
+    categorical_columns, temporal_columns = temporal_and_categorical_columns(rows)
+    grouped_dimensions_are_visible = bool(categorical_columns and temporal_columns)
+    grouped_dimensions_are_valid = (
+        grouped_dimensions_are_visible
+        and _dimension_is_grouped(expression, group_expressions, categorical_columns[0])
+        and _dimension_is_grouped(expression, group_expressions, temporal_columns[0])
+    )
+    return not (
+        selects_count
+        and len(group_expressions) == 2
+        and grouped_dimensions_are_valid
+    )
+
+
 def interpret_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Interpret intent without exposing internal reasoning."""
+    _checkpoint(dependencies, PublicPhase.UNDERSTANDING)
     updated = _copied(state)
     prompt = interpretation_prompt(state["question"], state["format_hint"])
-    updated["interpretation"] = dependencies.llm.complete_json(prompt.system, prompt.user)
+    updated["interpretation"] = _complete_json(dependencies, prompt.system, prompt.user)
     _record(updated, "interpretar", "Pergunta e formato interpretados.")
     return updated
 
 
 def discover_schema_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Discover and serialize the runtime database schema."""
+    _checkpoint(dependencies, PublicPhase.SCHEMA)
     updated = _copied(state)
     snapshot = dependencies.schema_provider()
+    _checkpoint(dependencies)
     updated["schema"] = snapshot.to_dsl()
     _record(
         updated,
@@ -144,6 +262,7 @@ def discover_schema_node(state: AgentState, dependencies: GraphDependencies) -> 
 
 def generate_sql_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Generate an initial SQL statement grounded in the discovered schema."""
+    _checkpoint(dependencies, PublicPhase.VALIDATING)
     updated = _copied(state)
     prompt = generate_sql_prompt(
         state["question"],
@@ -152,7 +271,7 @@ def generate_sql_node(state: AgentState, dependencies: GraphDependencies) -> Age
         state["interpretation"],
     )
     updated["last_sql"] = _strip_sql_fence(
-        dependencies.llm.complete(prompt.system, prompt.user)
+        _complete_text(dependencies, prompt.system, prompt.user)
     )
     updated["last_error"] = None
     _record(updated, "gerar_sql", "Consulta inicial gerada.", sql=updated["last_sql"])
@@ -161,6 +280,7 @@ def generate_sql_node(state: AgentState, dependencies: GraphDependencies) -> Age
 
 def validate_sql_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Apply deterministic guardrails before any executor call."""
+    _checkpoint(dependencies, PublicPhase.VALIDATING)
     del dependencies
     updated = _copied(state)
     try:
@@ -182,6 +302,7 @@ def validate_sql_node(state: AgentState, dependencies: GraphDependencies) -> Age
 
 def execute_sql_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Execute one validated query and preserve SQLite's useful error message."""
+    _checkpoint(dependencies, PublicPhase.QUERYING)
     updated = _copied(state)
     if state["query_budget"] <= 0:
         budget_error = "Orçamento máximo de consultas esgotado."
@@ -192,9 +313,21 @@ def execute_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agen
     updated["query_budget"] = state["query_budget"] - 1
     updated["queries"].append(state["last_sql"])
     try:
-        raw_rows = dependencies.executor.execute(state["last_sql"])
+        if dependencies.execution_control is None:
+            raw_rows = dependencies.executor.execute(state["last_sql"])
+        else:
+            raw_rows = dependencies.executor.execute(
+                state["last_sql"],
+                cancel_event=dependencies.execution_control.cancel_event,
+            )
         rows = [dict(row) for row in raw_rows]
+    except ExecutionCancelledError:
+        if dependencies.execution_control is not None:
+            dependencies.execution_control.checkpoint()
+        raise
     except Exception as exc:
+        if dependencies.execution_control is not None:
+            dependencies.execution_control.checkpoint()
         error = f"{type(exc).__name__}: {exc}"
         updated["last_result"] = None
         updated["last_error"] = error
@@ -206,6 +339,7 @@ def execute_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agen
             error=error,
         )
     else:
+        _checkpoint(dependencies)
         updated["last_result"] = rows
         updated["result_history"].append(rows)
         updated["last_error"] = None
@@ -221,6 +355,7 @@ def execute_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agen
 
 def correct_sql_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Generate one corrected SQL statement using structured error feedback."""
+    _checkpoint(dependencies, PublicPhase.VALIDATING)
     updated = _copied(state)
     prompt = correct_sql_prompt(
         state["question"],
@@ -230,7 +365,7 @@ def correct_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agen
         state["last_result"],
     )
     updated["last_sql"] = _strip_sql_fence(
-        dependencies.llm.complete(prompt.system, prompt.user)
+        _complete_text(dependencies, prompt.system, prompt.user)
     )
     updated["sql_fix_attempts"] = state["sql_fix_attempts"] + 1
     updated["last_error"] = None
@@ -245,8 +380,20 @@ def correct_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agen
 
 def evaluate_sufficiency_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Decide whether successful rows answer the question."""
+    _checkpoint(dependencies, PublicPhase.CHECKING)
     updated = _copied(state)
     result = state["last_result"] or []
+    if _needs_temporal_category_aggregation(
+        state["question"], state["last_sql"], state["last_result"]
+    ):
+        updated["sufficient"] = False
+        _record(
+            updated,
+            "avaliar_suficiencia",
+            "A contagem por período e categoria requer uma consulta agregada.",
+            sufficient=False,
+        )
+        return updated
     quantitative = any(
         token in state["question"].casefold()
         for token in ("quant", "média", "media", "total", "número", "numero")
@@ -256,7 +403,7 @@ def evaluate_sufficiency_node(state: AgentState, dependencies: GraphDependencies
     else:
         prompt = sufficiency_prompt(state["question"], state["last_sql"], result)
         try:
-            assessment = dependencies.llm.complete_json(prompt.system, prompt.user)
+            assessment = _complete_json(dependencies, prompt.system, prompt.user)
         except LLMOperationalError as exc:
             updated["operational_error"] = exc.code
             updated["warnings"].append(str(exc))
@@ -271,6 +418,7 @@ def evaluate_sufficiency_node(state: AgentState, dependencies: GraphDependencies
 
 def refine_sql_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Generate a complementary query without consuming correction attempts."""
+    _checkpoint(dependencies, PublicPhase.CHECKING)
     updated = _copied(state)
     prior_rows = [row for result in state["result_history"] for row in result[:20]]
     prompt = generate_sql_prompt(
@@ -282,13 +430,17 @@ def refine_sql_node(state: AgentState, dependencies: GraphDependencies) -> Agent
     )
     try:
         updated["last_sql"] = _strip_sql_fence(
-            dependencies.llm.complete(prompt.system, prompt.user)
+            _complete_text(dependencies, prompt.system, prompt.user)
         )
     except LLMOperationalError as exc:
         updated["operational_error"] = exc.code
         updated["warnings"].append(str(exc))
         _record(updated, "refinar_consulta", "Refinamento interrompido pelo provedor.")
         return updated
+    if _needs_temporal_category_aggregation(
+        state["question"], state["last_sql"], state["last_result"]
+    ):
+        updated["aggregation_refinement_attempts"] += 1
     updated["last_error"] = None
     _record(updated, "refinar_consulta", "Consulta complementar gerada.", sql=updated["last_sql"])
     return updated
@@ -308,10 +460,28 @@ def _fallback_response(state: AgentState, status: str) -> str:
 
 def format_response_node(state: AgentState, dependencies: GraphDependencies) -> AgentState:
     """Build a validated answer, with deterministic output if formatting fails."""
+    _checkpoint(dependencies, PublicPhase.FORMATTING)
     updated = _copied(state)
-    result = state["last_result"] or []
+    aggregation_missing = _needs_temporal_category_aggregation(
+        state["question"], state["last_sql"], state["last_result"]
+    )
+    result = [] if aggregation_missing else (state["last_result"] or [])
+    if aggregation_missing:
+        warning = (
+            "A consulta trouxe registros individuais e não foi possível validar uma "
+            "contagem agrupada por período e categoria. As linhas individuais foram "
+            "ocultadas; ajuste a pergunta ou tente novamente."
+        )
+        if warning not in updated["warnings"]:
+            updated["warnings"].append(warning)
+        updated["steps"] = [
+            {key: value for key, value in step.items() if key != "rows"}
+            for step in updated["steps"]
+        ]
     exhausted_with_error = bool(state["last_error"])
-    if state["operational_error"] or exhausted_with_error:
+    if aggregation_missing:
+        status = "partial"
+    elif state["operational_error"] or exhausted_with_error:
         status = "partial" if result else "error"
     elif not state["sufficient"] and state["query_budget"] <= 0:
         status = "partial"
@@ -321,8 +491,13 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
         status = "success"
 
     proposal: Mapping[str, Any] | None = None
-    response_text = _fallback_response(state, status)
-    if not exhausted_with_error and not state["operational_error"]:
+    response_text = (
+        "Não foi possível preparar a quantidade solicitada por período e categoria. "
+        "A consulta trouxe registros individuais e a agregação precisa ser refeita."
+        if aggregation_missing
+        else _fallback_response(state, status)
+    )
+    if not aggregation_missing and not exhausted_with_error and not state["operational_error"]:
         available_types = compatible_visualization_types(result)
         prompt = format_answer_prompt(
             state["question"],
@@ -332,7 +507,7 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
             state["format_hint"],
         )
         try:
-            payload = dependencies.llm.complete_json(prompt.system, prompt.user)
+            payload = _complete_json(dependencies, prompt.system, prompt.user)
             response_text = str(payload.get("response") or response_text)
             raw_proposal = payload.get("visualization")
             proposal = raw_proposal if isinstance(raw_proposal, Mapping) else None
@@ -352,6 +527,7 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
         default_title="Resultado da consulta",
     )
     _record(updated, "formatar_resposta", f"Resposta final preparada com status {status}.")
+    _checkpoint(dependencies)
     updated["response"] = AssistantAnswer(
         status=status,  # type: ignore[arg-type]
         response=response_text,
@@ -362,6 +538,7 @@ def format_response_node(state: AgentState, dependencies: GraphDependencies) -> 
         warnings=updated["warnings"],
         operational_code=updated["operational_error"],
     )
+    _checkpoint(dependencies)
     return updated
 
 
@@ -393,6 +570,13 @@ def route_after_execution(state: AgentState, *, max_fix_attempts: int = 3) -> Ex
 def route_after_sufficiency(state: AgentState) -> SufficiencyRoute:
     """Refine successful but insufficient results while budget remains."""
     if state["operational_error"] or state["sufficient"] or state["query_budget"] <= 0:
+        return "formatar_resposta"
+    if (
+        state["aggregation_refinement_attempts"] >= 1
+        and _needs_temporal_category_aggregation(
+            state["question"], state["last_sql"], state["last_result"]
+        )
+    ):
         return "formatar_resposta"
     return "refinar_consulta"
 

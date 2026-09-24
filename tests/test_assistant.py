@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ import pytest
 
 from data_assistant.assistant import DataAssistant, resolve_database_path
 from data_assistant.errors import QuotaExceededError
+from data_assistant.execution import ExecutionControl
+from data_assistant.limits import global_concurrency_gate
 
 
 @pytest.fixture
@@ -89,3 +92,47 @@ def test_quota_error_returns_typed_operational_answer(assistant_db: Path) -> Non
     assert answer.operational_code == "quota_exhausted"
     assert "chave própria" in answer.response
     assert "Traceback" not in answer.response
+
+
+def test_cancel_during_provider_call_discards_result_and_releases_concurrency(
+    assistant_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider_started = threading.Event()
+    provider_release = threading.Event()
+    control = ExecutionControl()
+
+    class BlockingLLM:
+        def complete(self, system_prompt: str, user_prompt: str) -> str:
+            del system_prompt, user_prompt
+            raise AssertionError("Não deve haver chamada posterior ao cancelamento")
+
+        def complete_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+            del system_prompt, user_prompt
+            provider_started.set()
+            provider_release.wait(2)
+            return {"intent": "conteúdo que deve ser descartado"}
+
+    monkeypatch.setenv("MAX_CONCURRENT_QUESTIONS", "1")
+    assistant = DataAssistant(assistant_db, llm=BlockingLLM())
+    answers = []
+    worker = threading.Thread(
+        target=lambda: answers.append(
+            assistant.ask("Quantos registros?", execution_control=control)
+        )
+    )
+    worker.start()
+    assert provider_started.wait(1)
+    control.request_cancel()
+    provider_release.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert len(answers) == 1
+    assert answers[0].status == "cancelled"
+    assert answers[0].data == []
+    assert answers[0].queries == []
+    assert answers[0].warnings
+
+    gate = global_concurrency_gate(1)
+    assert gate.acquire(blocking=False)
+    gate.release()

@@ -185,6 +185,46 @@ def test_duplicate_period_and_group_falls_back_without_aggregation() -> None:
     )
     with pytest.raises(VisualizationRenderError, match="uma linha por período/série"):
         build_plotly_figure(data, visual)
+
+
+def test_temporal_bar_is_grouped_by_category_and_sorted_chronologically() -> None:
+    from data_assistant.visualization import normalize_visualization
+
+    data = [
+        {"data_registro": "2024-08-08", "tipo": "Loja", "quantidade": 1},
+        {"data_registro": "2024-08-07", "tipo": "Compra", "quantidade": 3},
+        {"data_registro": "2024-08-07", "tipo": "Suporte", "quantidade": 2},
+        {"data_registro": "2024-08-08", "tipo": "Compra", "quantidade": 4},
+    ]
+    visual = normalize_visualization(
+        data,
+        {"type": "bar", "title": "Registros por data", "x": "tipo", "y": ["quantidade"]},
+    )
+
+    assert visual.type == "bar"
+    assert visual.x == "data_registro"
+    assert visual.group == "tipo"
+    figure = build_plotly_figure(data, visual)
+
+    assert figure.layout.barmode == "group"
+    assert [trace.name for trace in figure.data] == ["Compra", "Loja", "Suporte"]
+    assert figure.data[0].x == ("2024-08-07", "2024-08-08")
+    assert figure.data[0].y == (3, 4)
+    assert figure.data[0].text == ("3", "4")
+    assert figure.data[1].y == (None, 1)
+
+
+def test_temporal_grouped_bar_rejects_duplicate_period_category_measure() -> None:
+    data = [
+        {"mes": "2025-01", "tipo": "Compra", "quantidade": 2},
+        {"mes": "2025-01", "tipo": "Compra", "quantidade": 3},
+    ]
+    visual = visualization_for_type(data, "bar", title="Quantidade por mês e tipo")
+
+    assert visual.x == "mes"
+    assert visual.group == "tipo"
+    with pytest.raises(VisualizationRenderError, match="uma linha por período/dimensão/medida"):
+        build_plotly_figure(data, visual)
     table = visualization_for_type(data, "table", title="Tendência")
     assert len(build_plotly_figure(data, table).data[0].cells.values[0]) == 2
 

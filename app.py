@@ -12,6 +12,11 @@ import streamlit as st
 
 from data_assistant.assistant import DataAssistant, resolve_database_path
 from data_assistant.contract import AssistantAnswer, Visualization, VisualizationType
+from data_assistant.execution import (
+    EXECUTIONS,
+    ExecutionCapacityError,
+    ExecutionSnapshot,
+)
 from data_assistant.llm import DEFAULT_MODEL, LLMSettings
 from data_assistant.visualization import (
     ImageExportError,
@@ -133,6 +138,12 @@ MATERIAL_STYLES = """
   transform-origin: 0.125rem 0.9rem;
   width: 0.25rem;
 }
+.da-progress-note {
+  color: var(--da-muted);
+  font-size: 0.85rem;
+  margin: 0.2rem 0 0.6rem 2.75rem;
+  max-width: 68ch;
+}
 @keyframes da-pulse {
   0%, 100% { opacity: 0.28; }
   48% { opacity: 1; }
@@ -163,14 +174,14 @@ def _brand_markup() -> str:
     )
 
 
-def _loading_markup() -> str:
+def _loading_markup(message: str = "Entendendo a pergunta") -> str:
     capsules = "".join(
         f'<span style="--i:{index}" aria-hidden="true"></span>' for index in range(6)
     )
     return (
         '<div class="da-loading" role="status" aria-live="polite">'
         f'<span class="da-loading-mark" aria-hidden="true">{capsules}</span>'
-        '<span>Interpretando a pergunta e consultando o banco…</span></div>'
+        f"<span>{message}</span></div>"
     )
 
 
@@ -183,6 +194,39 @@ def _initialize_session(database_path: Path) -> None:
         settings = LLMSettings.for_session_key(personal_key) if personal_key else None
         st.session_state.assistant = DataAssistant(database_path, llm_settings=settings)
         st.session_state.assistant_database_path = str(database_path)
+
+
+def _theme_choice_changed() -> None:
+    """Persist the appearance choice for the current Streamlit session only."""
+    selected = st.session_state.get("appearance_choice", "Sistema")
+    if selected == "Claro":
+        st.session_state["theme_override"] = "light"
+    elif selected == "Escuro":
+        st.session_state["theme_override"] = "dark"
+    else:
+        st.session_state.pop("theme_override", None)
+
+
+def _render_theme_control() -> None:
+    """Keep the optional theme override in a compact, keyboard-accessible popover."""
+    choices = {"system": "Sistema", "light": "Claro", "dark": "Escuro"}
+    override = st.session_state.get("theme_override", "system")
+    initial_choice = choices.get(override, "Sistema")
+    if "appearance_choice" not in st.session_state:
+        st.session_state["appearance_choice"] = initial_choice
+
+    _, control_column = st.columns([0.82, 0.18], gap="small")
+    with control_column, st.popover(
+        "Tema",
+        icon=":material/contrast:",
+        help="Aparência da interface nesta sessão",
+    ):
+        st.radio(
+            "Aparência da interface",
+            options=("Sistema", "Claro", "Escuro"),
+            key="appearance_choice",
+            on_change=_theme_choice_changed,
+        )
 
 
 def _activate_session_key(
@@ -279,16 +323,29 @@ def _cached_png(
 
 
 def _is_dark_theme() -> bool:
-    """Read the effective browser/system theme from Streamlit's context."""
+    """Read the session override or the effective browser/system theme."""
+    return _effective_theme() == "dark"
+
+
+def _effective_theme() -> str:
+    """Resolve a per-session override, falling back to Streamlit's system theme."""
+    override = st.session_state.get("theme_override", "system")
+    if override in ("light", "dark"):
+        return str(override)
     context_theme = getattr(getattr(st.context, "theme", None), "type", "light")
-    return context_theme == "dark"
+    return "dark" if context_theme == "dark" else "light"
 
 
 def _effective_palette_css() -> str:
-    """Keep custom surfaces aligned with Streamlit's effective system theme."""
-    if _is_dark_theme():
+    """Keep native controls and custom surfaces aligned with the effective theme."""
+    if _effective_theme() == "dark":
         tokens = (
             "color-scheme:dark;"
+            "--primary-color:#b9c5ff;"
+            "--background-color:#111318;"
+            "--secondary-background-color:#1b1c22;"
+            "--text-color:#e5e2e9;"
+            "--border-color:#3a3b43;"
             "--da-primary:oklch(0.75 0.12 265);"
             "--da-primary-soft:oklch(0.28 0.045 265);"
             "--da-surface:oklch(0.19 0.012 265);"
@@ -299,6 +356,11 @@ def _effective_palette_css() -> str:
     else:
         tokens = (
             "color-scheme:light;"
+            "--primary-color:#5262bd;"
+            "--background-color:#fbf9ff;"
+            "--secondary-background-color:#f1f0f7;"
+            "--text-color:#191a20;"
+            "--border-color:#c6c5d0;"
             "--da-primary:oklch(0.48 0.17 265);"
             "--da-primary-soft:oklch(0.94 0.035 265);"
             "--da-surface:oklch(0.98 0.004 265);"
@@ -306,7 +368,23 @@ def _effective_palette_css() -> str:
             "--da-muted:oklch(0.46 0.025 265);"
             "--da-outline:oklch(0.86 0.012 265);"
         )
-    return f"<style>:root {{{tokens}}}</style>"
+    return f"<style>:root, .stApp {{{tokens}}}</style>"
+
+
+def _progress_markup(snapshot: ExecutionSnapshot) -> str:
+    """Render only allow-listed public phases and cancellation status."""
+    if snapshot.cancellation_requested:
+        message = "Solicitação de parada enviada. Encerrando a etapa atual."
+    else:
+        message = snapshot.phase.value
+    markup = _loading_markup(message)
+    if snapshot.cancellation_requested and snapshot.may_have_consumed_quota:
+        markup += (
+            '<div class="da-progress-note" role="status" aria-live="polite">'
+            "Uma chamada já iniciada pode ter consumido cota; o resultado será descartado."
+            "</div>"
+        )
+    return markup
 
 
 def _render_visualization(answer: AssistantAnswer, *, key_prefix: str) -> None:
@@ -388,6 +466,11 @@ def _render_evidence(answer: AssistantAnswer) -> None:
 
 
 def _render_answer(answer: AssistantAnswer, *, key_prefix: str) -> None:
+    if answer.status == "cancelled":
+        st.info(answer.response)
+        for warning in answer.warnings:
+            st.warning(warning)
+        return
     status_renderers = {
         "error": st.error,
         "partial": st.warning,
@@ -404,6 +487,72 @@ def _render_answer(answer: AssistantAnswer, *, key_prefix: str) -> None:
     _render_evidence(answer)
 
 
+def _store_answer(answer: AssistantAnswer) -> None:
+    """Append a completed worker result once and preserve the explicit BYOK flow."""
+    messages: list[dict[str, Any]] = st.session_state.messages
+    messages.append({"role": "assistant", "content": answer.response, "answer": answer})
+    question = next(
+        (
+            str(message.get("content", ""))
+            for message in reversed(messages[:-1])
+            if message.get("role") == "user"
+        ),
+        "",
+    )
+    if answer.operational_code in ("quota_exhausted", "invalid_key"):
+        st.session_state.pending_question = question
+        if answer.operational_code == "invalid_key" or (
+            answer.operational_code == "quota_exhausted"
+            and st.session_state.get("byok_api_key")
+        ):
+            st.session_state.byok_invalid = True
+
+
+@st.fragment(run_every=0.5)
+def _poll_active_execution(execution_id: str) -> None:
+    """Poll a worker without starting another query or touching it from the worker."""
+    if st.session_state.get("active_execution_id") != execution_id:
+        return
+    snapshot = EXECUTIONS.snapshot(execution_id)
+    if snapshot is None:
+        answer = AssistantAnswer(
+            status="error",
+            response="A execução expirou antes de retornar. Envie a pergunta novamente.",
+            visualization=Visualization(
+                type="table", title="Execução expirada", available_types=["table"]
+            ),
+            operational_code="local_error",
+        )
+        st.session_state.pop("active_execution_id", None)
+        _store_answer(answer)
+        st.rerun()
+        return
+    if snapshot.done:
+        answer = EXECUTIONS.consume(execution_id)
+        if answer is None:
+            answer = AssistantAnswer(
+                status="error",
+                response="Não foi possível recuperar a resposta. Envie a pergunta novamente.",
+                visualization=Visualization(
+                    type="table", title="Falha operacional", available_types=["table"]
+                ),
+                operational_code="local_error",
+            )
+        st.session_state.pop("active_execution_id", None)
+        _store_answer(answer)
+        st.rerun()
+        return
+
+    st.markdown(_progress_markup(snapshot), unsafe_allow_html=True)
+    cancel_clicked = st.button(
+        "Parar execução",
+        key=f"stop_execution_{execution_id}",
+        disabled=snapshot.cancellation_requested,
+    )
+    if cancel_clicked:
+        EXECUTIONS.cancel(execution_id)
+
+
 def _render_history(messages: list[dict[str, Any]]) -> None:
     for index, message in enumerate(messages):
         with st.chat_message(message["role"]):
@@ -418,7 +567,7 @@ def _render_history(messages: list[dict[str, Any]]) -> None:
                 st.markdown(str(message["content"]))
 
 
-def _sidebar(database_path: Path) -> str | None:
+def _sidebar(database_path: Path, *, busy: bool = False) -> str | None:
     selected_question: str | None = None
     with st.sidebar:
         st.subheader("Assistente de Dados")
@@ -443,7 +592,7 @@ def _sidebar(database_path: Path) -> str | None:
                 question,
                 key=f"example_{index}",
                 use_container_width=True,
-                disabled=not database_path.is_file(),
+                disabled=not database_path.is_file() or busy,
             ):
                 selected_question = question
         st.divider()
@@ -462,7 +611,12 @@ def main() -> None:
     st.markdown(_effective_palette_css(), unsafe_allow_html=True)
     database_path = _query_database_path()
     _initialize_session(database_path)
-    selected_question = _sidebar(database_path)
+    active_execution_id = st.session_state.get("active_execution_id")
+    if not isinstance(active_execution_id, str):
+        active_execution_id = None
+    busy = active_execution_id is not None
+    selected_question = _sidebar(database_path, busy=busy)
+    _render_theme_control()
 
     st.markdown(_brand_markup(), unsafe_allow_html=True)
 
@@ -479,7 +633,9 @@ def main() -> None:
 
     messages: list[dict[str, Any]] = st.session_state.messages
     _render_history(messages)
-    had_pending = bool(st.session_state.get("pending_question"))
+    if active_execution_id is not None:
+        with st.chat_message("assistant"):
+            _poll_active_execution(active_execution_id)
     retry_question = _render_byok_controls(database_path)
     if not messages:
         st.markdown(
@@ -495,33 +651,35 @@ def main() -> None:
 
     typed_question = st.chat_input(
         "Pergunte sobre clientes, compras, suporte ou campanhas",
-        disabled=not database_path.is_file(),
+        disabled=not database_path.is_file() or busy,
     )
-    question = retry_question or selected_question or typed_question
+    question = None if busy else (retry_question or selected_question or typed_question)
     if not question:
         return
 
     messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.markdown(question)
-    with st.chat_message("assistant"):
-        loading = st.empty()
-        loading.markdown(_loading_markup(), unsafe_allow_html=True)
-        try:
-            assistant: DataAssistant = st.session_state.assistant
-            answer = assistant.ask(question)
-        finally:
-            loading.empty()
-        _render_answer(answer, key_prefix=f"answer_{len(messages)}")
-    messages.append({"role": "assistant", "content": answer.response, "answer": answer})
-    if answer.operational_code in ("quota_exhausted", "invalid_key"):
-        st.session_state.pending_question = question
-        if answer.operational_code == "invalid_key" or (
-            answer.operational_code == "quota_exhausted" and st.session_state.get("byok_api_key")
-        ):
-            st.session_state.byok_invalid = True
-        if not had_pending:
-            _render_byok_controls(database_path)
+    assistant: DataAssistant = st.session_state.assistant
+    try:
+        execution_id = EXECUTIONS.start(
+            lambda control: assistant.ask(question, execution_control=control)
+        )
+    except ExecutionCapacityError:
+        _store_answer(
+            AssistantAnswer(
+                status="error",
+                response=(
+                    "O assistente está atendendo outras perguntas. "
+                    "Aguarde e tente novamente."
+                ),
+                visualization=Visualization(
+                    type="table", title="Execução indisponível", available_types=["table"]
+                ),
+                operational_code="rate_limited",
+            )
+        )
+    else:
+        st.session_state.active_execution_id = execution_id
+    st.rerun()
 
 
 if __name__ == "__main__":

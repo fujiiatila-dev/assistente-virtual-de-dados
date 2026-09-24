@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
+from data_assistant.execution import ExecutionCancelledError
 from data_assistant.executor import DatabaseNotFoundError, SQLiteExecutor, enforce_row_limit
 
 
@@ -84,6 +87,80 @@ def test_timeout_interrupts_expensive_query(executor_db: Path) -> None:
     """
     with pytest.raises(sqlite3.OperationalError, match="interrupted"):
         SQLiteExecutor(executor_db, timeout_seconds=0.001).execute(sql)
+
+
+def test_cancel_interrupts_sqlite_work_in_progress(
+    executor_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = SQLiteExecutor(executor_db)
+    cancel_event = threading.Event()
+    query_started = threading.Event()
+    release_query = threading.Event()
+    errors: list[ExecutionCancelledError] = []
+    original_connect = executor._connect
+
+    def connect_with_blocking_function() -> sqlite3.Connection:
+        connection = original_connect()
+
+        def wait_inside_query() -> int:
+            query_started.set()
+            release_query.wait(2)
+            return 1
+
+        connection.create_function("wait_inside_query", 0, wait_inside_query)
+        return connection
+
+    monkeypatch.setattr(executor, "_connect", connect_with_blocking_function)
+
+    def run_query() -> None:
+        try:
+            executor.execute("SELECT wait_inside_query()", cancel_event=cancel_event)
+        except ExecutionCancelledError as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_query)
+    worker.start()
+    assert query_started.wait(1)
+    cancel_event.set()
+    release_query.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert len(errors) == 1
+
+
+def test_cancel_event_is_checked_by_sqlite_progress_handler(executor_db: Path) -> None:
+    executor = SQLiteExecutor(executor_db, timeout_seconds=5)
+    cancel_event = threading.Event()
+    query_started = threading.Event()
+    errors: list[ExecutionCancelledError] = []
+    sql = """
+    WITH RECURSIVE counter(value) AS (
+        SELECT 1
+        UNION ALL
+        SELECT value + 1 FROM counter WHERE value < 100000000
+    )
+    SELECT SUM(value) AS total FROM counter
+    """
+
+    def run_query() -> None:
+        query_started.set()
+        try:
+            executor.execute(sql, cancel_event=cancel_event)
+        except ExecutionCancelledError as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_query)
+    started_at = time.monotonic()
+    worker.start()
+    assert query_started.wait(1)
+    time.sleep(0.05)
+    cancel_event.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert len(errors) == 1
+    assert time.monotonic() - started_at < 2
 
 
 def test_invalid_sql_preserves_sqlite_error(executor_db: Path) -> None:
